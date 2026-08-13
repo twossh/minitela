@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"runtime"
@@ -14,6 +15,22 @@ const (
 )
 
 func main() {
+	setBrightness := flag.Int(
+		"set-brightness",
+		-1,
+		"define o brilho da MiniTela entre 0 e 100",
+	)
+
+	flag.Parse()
+
+	if *setBrightness < -1 || *setBrightness > 100 {
+		fmt.Fprintln(
+			os.Stderr,
+			"Erro: brilho deve estar entre 0 e 100.",
+		)
+		os.Exit(2)
+	}
+
 	fmt.Printf("%s %s\n", appName, appVersion)
 	fmt.Println("MiniTela para Positivo R15M")
 	fmt.Printf("Sistema: %s/%s\n", runtime.GOOS, runtime.GOARCH)
@@ -85,6 +102,31 @@ func main() {
 		fmt.Printf(
 			"Brilho      : %d%%\n",
 			brightness,
+		)
+	}
+
+	if *setBrightness >= 0 {
+		fmt.Println()
+		fmt.Printf(
+			"Definindo brilho para %d%%...\n",
+			*setBrightness,
+		)
+
+		actual, err := conn.WriteRegisterVerified(
+			r15m.RegisterBrightness,
+			uint32(*setBrightness),
+		)
+		if err != nil {
+			fmt.Printf(
+				"Erro ao definir brilho: %v\n",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		fmt.Printf(
+			"Brilho confirmado: %d%%\n",
+			actual,
 		)
 	}
 

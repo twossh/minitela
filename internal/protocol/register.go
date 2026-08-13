@@ -121,3 +121,161 @@ func ParseReadNumRegisterResponse(
 
 	return regID, value, nil
 }
+
+// BuildWriteNumRegisterRequest creates a CRC-enabled numeric SET_REGISTER
+// command for one R15M register.
+//
+// Frame:
+//
+// 41 48          start
+// 80 09          CRC enabled + command/content length
+// 00 90          SET_REGISTER
+// 80             numeric write, one register
+// RR RR          register ID
+// VV VV VV VV    uint32 value
+// CC CC          CRC-16/IBM
+// 4D 49          end
+func BuildWriteNumRegisterRequest(
+	regID uint16,
+	value uint32,
+) []byte {
+	const (
+		commandLength = 9
+		frameSize     = 17
+	)
+
+	frame := make([]byte, frameSize)
+
+	frame[0] = 0x41
+	frame[1] = 0x48
+
+	// Bit 15 = CRC enabled.
+	controlFlag := uint16(0x8000 | commandLength)
+
+	binary.BigEndian.PutUint16(
+		frame[2:4],
+		controlFlag,
+	)
+
+	// SET_REGISTER.
+	binary.BigEndian.PutUint16(
+		frame[4:6],
+		0x0090,
+	)
+
+	// Numeric write / one register.
+	frame[6] = 0x80
+
+	binary.BigEndian.PutUint16(
+		frame[7:9],
+		regID,
+	)
+
+	binary.BigEndian.PutUint32(
+		frame[9:13],
+		value,
+	)
+
+	// CRC covers:
+	// controlFlag + command type + content.
+	crc := CRC16IBM(frame[2:13])
+
+	binary.BigEndian.PutUint16(
+		frame[13:15],
+		crc,
+	)
+
+	frame[15] = 0x4D
+	frame[16] = 0x49
+
+	return frame
+}
+
+// ValidateWriteNumRegisterResponse validates SET_REGISTER_RESPONSE.
+//
+// R15M quirk:
+// the firmware may set the CRC flag but return CRC 0x0000.
+// A valid SET_REGISTER_RESPONSE is treated as an ACK.
+func ValidateWriteNumRegisterResponse(
+	frame []byte,
+) error {
+	if len(frame) < 10 {
+		return fmt.Errorf(
+			"resposta SET_REGISTER muito curta: %d bytes",
+			len(frame),
+		)
+	}
+
+	if frame[0] != 0x41 || frame[1] != 0x48 {
+		return fmt.Errorf(
+			"cabeçalho SET_REGISTER inválido",
+		)
+	}
+
+	controlFlag := binary.BigEndian.Uint16(frame[2:4])
+
+	crcEnabled := controlFlag&0x8000 != 0
+	commandLength := int(controlFlag & 0x7FFF)
+
+	if commandLength < 2 {
+		return fmt.Errorf(
+			"commandLength inválido: %d",
+			commandLength,
+		)
+	}
+
+	expectedSize :=
+		2 + // start
+			2 + // controlFlag
+			commandLength +
+			2 + // CRC
+			2 // footer
+
+	if len(frame) != expectedSize {
+		return fmt.Errorf(
+			"tamanho SET_REGISTER inválido: recebido=%d esperado=%d",
+			len(frame),
+			expectedSize,
+		)
+	}
+
+	if frame[len(frame)-2] != 0x4D ||
+		frame[len(frame)-1] != 0x49 {
+		return fmt.Errorf(
+			"rodapé SET_REGISTER inválido",
+		)
+	}
+
+	commandType := binary.BigEndian.Uint16(
+		frame[4:6],
+	)
+
+	if commandType != 0x00D0 {
+		return fmt.Errorf(
+			"resposta inesperada: comando=0x%04X esperado=0x00D0",
+			commandType,
+		)
+	}
+
+	crcOffset := 4 + commandLength
+
+	expectedCRC := binary.BigEndian.Uint16(
+		frame[crcOffset : crcOffset+2],
+	)
+
+	if crcEnabled && expectedCRC != 0x0000 {
+		actualCRC := CRC16IBM(
+			frame[2:crcOffset],
+		)
+
+		if actualCRC != expectedCRC {
+			return fmt.Errorf(
+				"CRC inválido: recebido=0x%04X calculado=0x%04X",
+				expectedCRC,
+				actualCRC,
+			)
+		}
+	}
+
+	return nil
+}

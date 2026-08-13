@@ -69,3 +69,45 @@ func TestRejectInvalidRegisterResponse(t *testing.T) {
 		t.Fatal("frame inválido foi aceito")
 	}
 }
+
+func TestBuildWriteBrightness47(t *testing.T) {
+	got := BuildWriteNumRegisterRequest(7, 47)
+
+	want := []byte{
+		0x41, 0x48,
+		0x80, 0x09,
+		0x00, 0x90,
+		0x80,
+		0x00, 0x07,
+		0x00, 0x00, 0x00, 0x2F,
+		0x55, 0x05,
+		0x4D, 0x49,
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf(
+			"frame:\n got: % X\nwant: % X",
+			got,
+			want,
+		)
+	}
+}
+
+func TestValidateWriteACKWithZeroCRC(t *testing.T) {
+	// Synthetic R15M-style SET_REGISTER ACK:
+	// CRC flag enabled but CRC field = 0000.
+	frame := []byte{
+		0x41, 0x48,
+		0x80, 0x02,
+		0x00, 0xD0,
+		0x00, 0x00,
+		0x4D, 0x49,
+	}
+
+	if err := ValidateWriteNumRegisterResponse(frame); err != nil {
+		t.Fatalf(
+			"ACK R15M rejeitado: %v",
+			err,
+		)
+	}
+}
