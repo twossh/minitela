@@ -21,9 +21,22 @@ func main() {
 		"define o brilho da MiniTela entre 0 e 100",
 	)
 
+	screenName := flag.String(
+		"screen",
+		"",
+		"seleciona a tela: whatsapp, notes, monitor ou weather",
+	)
+
+	setPage := flag.Int(
+		"set-page",
+		-1,
+		"define diretamente a página 1-4 (diagnóstico)",
+	)
+
 	flag.Parse()
 
-	if *setBrightness < -1 || *setBrightness > 100 {
+	if *setBrightness < -1 ||
+		*setBrightness > 100 {
 		fmt.Fprintln(
 			os.Stderr,
 			"Erro: brilho deve estar entre 0 e 100.",
@@ -31,11 +44,59 @@ func main() {
 		os.Exit(2)
 	}
 
-	fmt.Printf("%s %s\n", appName, appVersion)
-	fmt.Println("MiniTela para Positivo R15M")
-	fmt.Printf("Sistema: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Println()
+	if *setPage != -1 &&
+		(*setPage < 1 || *setPage > 4) {
+		fmt.Fprintln(
+			os.Stderr,
+			"Erro: página deve estar entre 1 e 4.",
+		)
+		os.Exit(2)
+	}
 
+	if *screenName != "" &&
+		*setPage != -1 {
+		fmt.Fprintln(
+			os.Stderr,
+			"Erro: use --screen ou --set-page, não os dois.",
+		)
+		os.Exit(2)
+	}
+
+	var selectedScreen r15m.Screen
+
+	if *screenName != "" {
+		var err error
+
+		selectedScreen, err =
+			r15m.ParseScreen(*screenName)
+
+		if err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"Erro: %v\n",
+				err,
+			)
+			os.Exit(2)
+		}
+	}
+
+	fmt.Printf(
+		"%s %s\n",
+		appName,
+		appVersion,
+	)
+
+	fmt.Println(
+		"MiniTela para Positivo R15M",
+	)
+
+	fmt.Printf(
+		"Sistema: %s/%s\n",
+		runtime.GOOS,
+		runtime.GOARCH,
+	)
+
+	fmt.Println()
 	fmt.Println("Procurando MiniTela...")
 
 	conn, err := r15m.Connect()
@@ -49,7 +110,12 @@ func main() {
 
 	fmt.Println()
 	fmt.Println("Positivo R15M detectado")
-	fmt.Printf("Dispositivo : %s\n", conn.Device.Path)
+
+	fmt.Printf(
+		"Dispositivo : %s\n",
+		conn.Device.Path,
+	)
+
 	fmt.Printf(
 		"USB         : %s:%s\n",
 		conn.Device.VendorID,
@@ -78,21 +144,26 @@ func main() {
 	page, err := conn.ReadRegister(
 		r15m.RegisterCurrentPage,
 	)
+
 	if err != nil {
 		fmt.Printf(
 			"Página      : erro: %v\n",
 			err,
 		)
 	} else {
+		screen := r15m.Screen(page)
+
 		fmt.Printf(
-			"Página      : %d\n",
+			"Página      : %d (%s)\n",
 			page,
+			screen.String(),
 		)
 	}
 
 	brightness, err := conn.ReadRegister(
 		r15m.RegisterBrightness,
 	)
+
 	if err != nil {
 		fmt.Printf(
 			"Brilho      : erro: %v\n",
@@ -107,15 +178,18 @@ func main() {
 
 	if *setBrightness >= 0 {
 		fmt.Println()
+
 		fmt.Printf(
 			"Definindo brilho para %d%%...\n",
 			*setBrightness,
 		)
 
-		actual, err := conn.WriteRegisterVerified(
-			r15m.RegisterBrightness,
-			uint32(*setBrightness),
-		)
+		actual, err :=
+			conn.WriteRegisterVerified(
+				r15m.RegisterBrightness,
+				uint32(*setBrightness),
+			)
+
 		if err != nil {
 			fmt.Printf(
 				"Erro ao definir brilho: %v\n",
@@ -127,6 +201,61 @@ func main() {
 		fmt.Printf(
 			"Brilho confirmado: %d%%\n",
 			actual,
+		)
+	}
+
+	if *screenName != "" {
+		fmt.Println()
+
+		fmt.Printf(
+			"Selecionando tela %s...\n",
+			selectedScreen.String(),
+		)
+
+		if err :=
+			conn.SetScreen(
+				selectedScreen,
+			); err != nil {
+			fmt.Printf(
+				"Erro ao selecionar tela: %v\n",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		fmt.Printf(
+			"Tela confirmada: %s (%d)\n",
+			selectedScreen.String(),
+			selectedScreen,
+		)
+	}
+
+	if *setPage >= 0 {
+		fmt.Println()
+
+		fmt.Printf(
+			"Definindo página %d...\n",
+			*setPage,
+		)
+
+		actual, err :=
+			conn.WriteRegisterVerified(
+				r15m.RegisterCurrentPage,
+				uint32(*setPage),
+			)
+
+		if err != nil {
+			fmt.Printf(
+				"Erro ao definir página: %v\n",
+				err,
+			)
+			os.Exit(1)
+		}
+
+		fmt.Printf(
+			"Página confirmada: %d (%s)\n",
+			actual,
+			r15m.Screen(actual).String(),
 		)
 	}
 
