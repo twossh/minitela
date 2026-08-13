@@ -58,5 +58,35 @@ func main() {
 		conn.HandshakeResponse,
 	)
 
+	page, err := conn.ReadRegister(
+		r15m.RegisterCurrentPage,
+	)
+	if err != nil {
+		fmt.Printf(
+			"Página      : erro: %v\n",
+			err,
+		)
+	} else {
+		fmt.Printf(
+			"Página      : %d\n",
+			page,
+		)
+	}
+
+	brightness, err := conn.ReadRegister(
+		r15m.RegisterBrightness,
+	)
+	if err != nil {
+		fmt.Printf(
+			"Brilho      : erro: %v\n",
+			err,
+		)
+	} else {
+		fmt.Printf(
+			"Brilho      : %d%%\n",
+			brightness,
+		)
+	}
+
 	fmt.Println("Status      : conectada")
 }

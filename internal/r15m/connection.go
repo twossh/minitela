@@ -13,6 +13,63 @@ type Connection struct {
 	HandshakeResponse []byte
 }
 
+func (c *Connection) ReadRegister(
+	regID uint16,
+) (uint32, error) {
+	if c == nil || c.Port == nil {
+		return 0, fmt.Errorf(
+			"MiniTela não conectada",
+		)
+	}
+
+	// Não existe ainda nenhum worker em segundo plano,
+	// portanto podemos limpar qualquer byte antigo antes
+	// de uma transação síncrona.
+	_ = c.Port.ResetInputBuffer()
+
+	request := protocol.BuildReadNumRegisterRequest(regID)
+
+	if err := c.Port.WriteAll(request); err != nil {
+		return 0, fmt.Errorf(
+			"enviar leitura do registrador %d: %w",
+			regID,
+			err,
+		)
+	}
+
+	response, err := c.Port.ReadExact(
+		protocol.ReadRegisterResponseSize,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"ler registrador %d: %w",
+			regID,
+			err,
+		)
+	}
+
+	responseRegID, value, err :=
+		protocol.ParseReadNumRegisterResponse(response)
+
+	if err != nil {
+		return 0, fmt.Errorf(
+			"decodificar registrador %d: %w",
+			regID,
+			err,
+		)
+	}
+
+	if responseRegID != regID {
+		return 0, fmt.Errorf(
+			"registrador recebido=%d esperado=%d",
+			responseRegID,
+			regID,
+		)
+	}
+
+	return value, nil
+}
+
 func Connect() (*Connection, error) {
 	info, err := device.DetectR15M()
 	if err != nil {
