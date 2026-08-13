@@ -20,6 +20,13 @@ type WiFiSyncResult struct {
 	Quality   int
 }
 
+type BluetoothSyncResult struct {
+	Connected bool
+	Address   string
+	Name      string
+	Display   string
+}
+
 func (c *Connection) SyncBattery() (
 	*BatterySyncResult,
 	error,
@@ -48,8 +55,7 @@ func (c *Connection) SyncBattery() (
 	}
 
 	// Register 1150 is a display-state register.
-	// The R15M ACK is sufficient; reading it back does not
-	// reliably return the value just written.
+	// A valid ACK is sufficient.
 	if err := c.WriteRegister(
 		RegisterBatteryLevel,
 		level,
@@ -106,5 +112,42 @@ func (c *Connection) SyncWiFi() (
 		Display:   displaySSID,
 		SignalDBM: wifi.SignalDBM,
 		Quality:   wifi.Quality,
+	}, nil
+}
+
+func (c *Connection) SyncBluetooth() (
+	*BluetoothSyncResult,
+	error,
+) {
+	bluetooth, err := metrics.ReadBluetooth()
+	if err != nil {
+		return nil, err
+	}
+
+	// A single space reliably clears the text field on
+	// the R15M when no Bluetooth device is connected.
+	displayName := " "
+
+	if bluetooth.Connected {
+		displayName = DisplayText(
+			bluetooth.Name,
+		)
+	}
+
+	if err := c.WriteStringRegister(
+		RegisterBluetoothName,
+		[]byte(displayName),
+	); err != nil {
+		return nil, fmt.Errorf(
+			"atualizar Bluetooth: %w",
+			err,
+		)
+	}
+
+	return &BluetoothSyncResult{
+		Connected: bluetooth.Connected,
+		Address:   bluetooth.Address,
+		Name:      bluetooth.Name,
+		Display:   displayName,
 	}, nil
 }
