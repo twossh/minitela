@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/twossh/minitela/internal/device"
+	"github.com/twossh/minitela/internal/r15m"
 )
 
 const (
@@ -21,26 +21,42 @@ func main() {
 
 	fmt.Println("Procurando MiniTela...")
 
-	dev, err := device.DetectR15M()
+	conn, err := r15m.Connect()
 	if err != nil {
 		fmt.Println()
 		fmt.Println("Status: não conectada")
-		fmt.Printf("Detalhes: %v\n", err)
+		fmt.Printf("Erro: %v\n", err)
 		os.Exit(1)
 	}
+	defer conn.Close()
 
 	fmt.Println()
 	fmt.Println("Positivo R15M detectado")
-	fmt.Printf("Dispositivo : %s\n", dev.Path)
-	fmt.Printf("USB         : %s:%s\n", dev.VendorID, dev.ProductID)
+	fmt.Printf("Dispositivo : %s\n", conn.Device.Path)
+	fmt.Printf(
+		"USB         : %s:%s\n",
+		conn.Device.VendorID,
+		conn.Device.ProductID,
+	)
 
-	if dev.Product != "" {
-		fmt.Printf("Produto     : %s\n", dev.Product)
+	if conn.Device.Product != "" {
+		fmt.Printf(
+			"Produto     : %s\n",
+			conn.Device.Product,
+		)
 	}
 
-	if dev.Serial != "" {
-		fmt.Printf("Serial      : %s\n", dev.Serial)
+	if conn.Device.Serial != "" {
+		fmt.Printf(
+			"Serial      : %s\n",
+			conn.Device.Serial,
+		)
 	}
 
-	fmt.Println("Status      : detectada")
+	fmt.Printf(
+		"Handshake   : % X\n",
+		conn.HandshakeResponse,
+	)
+
+	fmt.Println("Status      : conectada")
 }
