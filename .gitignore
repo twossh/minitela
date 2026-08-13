@@ -1,0 +1,27 @@
+# Builds
+/bin/
+/dist/
+/build/
+
+# AppImage
+*.AppImage
+*.AppDir/
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+*.bak
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Local configuration
+config.local.json
+
+# ACF/generated files
+*.acf
+acf-analysis/
