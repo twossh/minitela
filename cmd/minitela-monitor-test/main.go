@@ -9,6 +9,9 @@ import (
 )
 
 func main() {
+	fmt.Println("=== MiniTela Monitor Test ===")
+	fmt.Println()
+
 	battery, err := metrics.ReadBattery()
 	if err != nil {
 		fmt.Fprintf(
@@ -40,6 +43,42 @@ func main() {
 	)
 
 	fmt.Println()
+
+	wifi, err := metrics.ReadWiFi()
+	if err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"Wi-Fi Linux: %v\n",
+			err,
+		)
+		os.Exit(1)
+	}
+
+	fmt.Println("Wi-Fi detectado:")
+	fmt.Printf(
+		"  Interface   : %s\n",
+		wifi.Interface,
+	)
+	fmt.Printf(
+		"  SSID        : %s\n",
+		wifi.SSID,
+	)
+	fmt.Printf(
+		"  Sinal       : %d dBm\n",
+		wifi.SignalDBM,
+	)
+	fmt.Printf(
+		"  Qualidade   : %d%%\n",
+		wifi.Quality,
+	)
+	fmt.Printf(
+		"  Texto R15M  : %s\n",
+		r15m.DisplayText(
+			wifi.SSID,
+		),
+	)
+
+	fmt.Println()
 	fmt.Println("Conectando à MiniTela...")
 
 	conn, err := r15m.Connect()
@@ -64,7 +103,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	result, err := conn.SyncBattery()
+	batteryResult, err :=
+		conn.SyncBattery()
+
 	if err != nil {
 		fmt.Fprintf(
 			os.Stderr,
@@ -74,19 +115,39 @@ func main() {
 		os.Exit(1)
 	}
 
+	wifiResult, err :=
+		conn.SyncWiFi()
+
+	if err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"Sincronizar Wi-Fi: %v\n",
+			err,
+		)
+		os.Exit(1)
+	}
+
 	fmt.Println()
 	fmt.Println("MiniTela atualizada:")
+
 	fmt.Printf(
-		"  Bateria : %d%%\n",
-		result.Capacity,
+		"  Bateria     : %d%%\n",
+		batteryResult.Capacity,
 	)
+
 	fmt.Printf(
-		"  Nível   : %d/3\n",
-		result.Level,
+		"  Nível       : %d/3\n",
+		batteryResult.Level,
 	)
+
 	fmt.Printf(
-		"  Status  : %s\n",
-		result.Status,
+		"  Wi-Fi       : %s\n",
+		wifiResult.Display,
+	)
+
+	fmt.Printf(
+		"  Qualidade   : %d%%\n",
+		wifiResult.Quality,
 	)
 
 	fmt.Println()

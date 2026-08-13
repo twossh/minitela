@@ -12,6 +12,14 @@ type BatterySyncResult struct {
 	Status   string
 }
 
+type WiFiSyncResult struct {
+	Interface string
+	SSID      string
+	Display   string
+	SignalDBM int
+	Quality   int
+}
+
 func (c *Connection) SyncBattery() (
 	*BatterySyncResult,
 	error,
@@ -29,7 +37,6 @@ func (c *Connection) SyncBattery() (
 		battery.Capacity,
 	)
 
-	// Battery percentage is a textual display register.
 	if err := c.WriteStringRegister(
 		RegisterBatteryText,
 		text,
@@ -40,14 +47,9 @@ func (c *Connection) SyncBattery() (
 		)
 	}
 
-	// Register 1150 controls the graphical battery level.
-	//
-	// Unlike normal configuration registers such as brightness
-	// and current page, this display-state register must not be
-	// verified by reading it back: the R15M firmware may return
-	// another internal/current value after accepting the write.
-	//
-	// A valid SET_REGISTER ACK is sufficient here.
+	// Register 1150 is a display-state register.
+	// The R15M ACK is sufficient; reading it back does not
+	// reliably return the value just written.
 	if err := c.WriteRegister(
 		RegisterBatteryLevel,
 		level,
@@ -62,5 +64,47 @@ func (c *Connection) SyncBattery() (
 		Capacity: battery.Capacity,
 		Level:    level,
 		Status:   battery.Status,
+	}, nil
+}
+
+func (c *Connection) SyncWiFi() (
+	*WiFiSyncResult,
+	error,
+) {
+	wifi, err := metrics.ReadWiFi()
+	if err != nil {
+		return nil, err
+	}
+
+	displaySSID := DisplayText(
+		wifi.SSID,
+	)
+
+	if err := c.WriteStringRegister(
+		RegisterWiFiSSID,
+		[]byte(displaySSID),
+	); err != nil {
+		return nil, fmt.Errorf(
+			"atualizar SSID: %w",
+			err,
+		)
+	}
+
+	if err := c.WriteRegister(
+		RegisterWiFiQuality,
+		uint32(wifi.Quality),
+	); err != nil {
+		return nil, fmt.Errorf(
+			"atualizar qualidade Wi-Fi: %w",
+			err,
+		)
+	}
+
+	return &WiFiSyncResult{
+		Interface: wifi.Interface,
+		SSID:      wifi.SSID,
+		Display:   displaySSID,
+		SignalDBM: wifi.SignalDBM,
+		Quality:   wifi.Quality,
 	}, nil
 }
