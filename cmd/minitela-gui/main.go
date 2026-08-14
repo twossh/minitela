@@ -19,6 +19,7 @@ import (
 
 	"github.com/twossh/minitela/internal/config"
 	"github.com/twossh/minitela/internal/customimage"
+	"github.com/twossh/minitela/internal/device"
 	"github.com/twossh/minitela/internal/gallery"
 	"github.com/twossh/minitela/internal/r15m"
 	"github.com/twossh/minitela/internal/textureupload"
@@ -57,6 +58,11 @@ func main() {
 	serviceStatus :=
 		widget.NewLabel("")
 
+	environmentStatus :=
+		widget.NewLabel("")
+	environmentStatus.Wrapping =
+		fyne.TextWrapWord
+
 	actionStatus :=
 		widget.NewLabel(
 			"Pronto",
@@ -65,15 +71,15 @@ func main() {
 	busy := false
 
 	refreshStatus := func() {
-		if serviceActive() {
-			serviceStatus.SetText(
-				"● MiniTela conectada / serviço ativo",
-			)
-		} else {
-			serviceStatus.SetText(
-				"○ Serviço MiniTela parado",
-			)
-		}
+		check := inspectEnvironment()
+
+		serviceStatus.SetText(
+			check.primaryStatus(),
+		)
+
+		environmentStatus.SetText(
+			check.detailStatus(),
+		)
 	}
 
 	refreshStatus()
@@ -439,6 +445,18 @@ func main() {
 			rebootButton,
 		)
 
+	diagnosticButton :=
+		widget.NewButton(
+			"Diagnóstico",
+			func() {
+				dialog.ShowInformation(
+					"Diagnóstico MiniTela",
+					inspectEnvironment().report(),
+					w,
+				)
+			},
+		)
+
 	controlCard :=
 		widget.NewCard(
 			"Controle",
@@ -449,7 +467,11 @@ func main() {
 				widget.NewSeparator(),
 
 				serviceStatus,
+				environmentStatus,
 				actionStatus,
+
+				widget.NewSeparator(),
+				diagnosticButton,
 			),
 		)
 
@@ -1311,6 +1333,238 @@ func serviceEnabled() bool {
 		)
 
 	return command.Run() == nil
+}
+
+type environmentCheck struct {
+	DeviceDetected bool
+	DevicePath     string
+	DeviceError    string
+	SystemdUser    bool
+	ServiceActive  bool
+	ServiceEnabled bool
+	UdevRule       bool
+	StableAlias    bool
+	Pkexec         bool
+}
+
+func inspectEnvironment() environmentCheck {
+	check := environmentCheck{
+		SystemdUser: systemdUserAvailable(),
+		UdevRule:    fileExists("/etc/udev/rules.d/99-minitela.rules"),
+		StableAlias: fileExists("/dev/minitela-r15m"),
+	}
+
+	if _, err := exec.LookPath("pkexec"); err == nil {
+		check.Pkexec = true
+	}
+
+	detected, err := device.DetectR15M()
+	if err == nil {
+		check.DeviceDetected = true
+		check.DevicePath = detected.Path
+	} else {
+		check.DeviceError = err.Error()
+	}
+
+	if check.SystemdUser {
+		check.ServiceActive = serviceActive()
+		check.ServiceEnabled = serviceEnabled()
+	}
+
+	return check
+}
+
+func (check environmentCheck) primaryStatus() string {
+	switch {
+	case !check.SystemdUser:
+		return "⚠ systemd do usuário indisponível"
+
+	case !check.DeviceDetected:
+		return "○ MiniTela não detectada"
+
+	case check.ServiceActive:
+		return "● MiniTela conectada / serviço ativo"
+
+	default:
+		return "○ MiniTela detectada / serviço parado"
+	}
+}
+
+func (check environmentCheck) detailStatus() string {
+	var parts []string
+
+	if check.DeviceDetected {
+		parts = append(
+			parts,
+			"Dispositivo: "+check.DevicePath,
+		)
+	} else {
+		parts = append(
+			parts,
+			"Conecte o Positivo Vision R15M via USB.",
+		)
+	}
+
+	if !check.SystemdUser {
+		parts = append(
+			parts,
+			"Serviço de usuário do systemd não disponível.",
+		)
+	}
+
+	if !check.UdevRule {
+		if check.Pkexec {
+			parts = append(
+				parts,
+				"Permissão udev pendente; reabra o AppImage e autorize a configuração.",
+			)
+		} else {
+			parts = append(
+				parts,
+				"Permissão udev pendente e pkexec não está disponível.",
+			)
+		}
+	} else if !check.StableAlias && check.DeviceDetected {
+		parts = append(
+			parts,
+			"Regra udev instalada; alias /dev/minitela-r15m ainda não apareceu.",
+		)
+	}
+
+	return strings.Join(parts, " • ")
+}
+
+func (check environmentCheck) report() string {
+	deviceLine := "não detectada"
+	if check.DeviceDetected {
+		deviceLine = "detectada em " + check.DevicePath
+	} else if check.DeviceError != "" {
+		deviceLine += " (" + check.DeviceError + ")"
+	}
+
+	lines := []string{
+		"R15M: " + deviceLine,
+		"systemd --user: " + availableText(check.SystemdUser),
+		"Backend: " + activeText(check.ServiceActive),
+		"Autostart: " + enabledText(check.ServiceEnabled),
+		"Regra udev: " + installedText(check.UdevRule),
+		"Alias /dev/minitela-r15m: " + availableText(check.StableAlias),
+		"pkexec: " + availableText(check.Pkexec),
+	}
+
+	if setup := lastSetupLog(); setup != "" {
+		lines = append(
+			lines,
+			"",
+			"Último setup:",
+			setup,
+		)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func systemdUserAvailable() bool {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+
+	command :=
+		exec.Command(
+			"systemctl",
+			"--user",
+			"show-environment",
+		)
+
+	return command.Run() == nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func lastSetupLog() string {
+	stateDir := os.Getenv("XDG_STATE_HOME")
+	if stateDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+
+		stateDir =
+			filepath.Join(
+				home,
+				".local",
+				"state",
+			)
+	}
+
+	data, err :=
+		os.ReadFile(
+			filepath.Join(
+				stateDir,
+				"minitela",
+				"setup.log",
+			),
+		)
+
+	if err != nil {
+		return ""
+	}
+
+	text :=
+		strings.TrimSpace(
+			string(data),
+		)
+
+	if text == "" {
+		return ""
+	}
+
+	lines :=
+		strings.Split(
+			text,
+			"\n",
+		)
+
+	if len(lines) > 5 {
+		lines = lines[len(lines)-5:]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func availableText(value bool) string {
+	if value {
+		return "disponível"
+	}
+
+	return "indisponível"
+}
+
+func activeText(value bool) string {
+	if value {
+		return "ativo"
+	}
+
+	return "parado"
+}
+
+func enabledText(value bool) string {
+	if value {
+		return "ativado"
+	}
+
+	return "desativado"
+}
+
+func installedText(value bool) string {
+	if value {
+		return "instalada"
+	}
+
+	return "ausente"
 }
 
 func screenDisplayName(

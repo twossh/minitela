@@ -117,20 +117,32 @@ if [[ -f "${SERVICE_SRC}" ]]; then
     fi
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
+mkdir -p "${SETUP_STATE_DIR}"
+
+if command -v systemctl >/dev/null 2>&1 &&
+   systemctl --user show-environment >/dev/null 2>&1; then
     if (( service_changed )); then
-        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        if ! systemctl --user daemon-reload >>"${SETUP_LOG}" 2>&1; then
+            printf '%s systemd: daemon-reload falhou\n' \
+                "$(date -Is)" >>"${SETUP_LOG}"
+        fi
     fi
 
-    if (( backend_changed || service_changed )); then
-        if systemctl --user is-active --quiet minitela.service; then
-            systemctl --user restart minitela.service >/dev/null 2>&1 || true
-        else
-            systemctl --user start minitela.service >/dev/null 2>&1 || true
-        fi
-    else
-        systemctl --user start minitela.service >/dev/null 2>&1 || true
+    service_action="start"
+
+    if (( backend_changed || service_changed )) &&
+       systemctl --user is-active --quiet minitela.service; then
+        service_action="restart"
     fi
+
+    if ! systemctl --user "${service_action}" minitela.service \
+        >>"${SETUP_LOG}" 2>&1; then
+        printf '%s systemd: %s do serviço falhou\n' \
+            "$(date -Is)" "${service_action}" >>"${SETUP_LOG}"
+    fi
+else
+    printf '%s systemd: gerenciador de usuário indisponível\n' \
+        "$(date -Is)" >>"${SETUP_LOG}"
 fi
 
 export PATH="${APPDIR}/usr/bin:${PATH}"
