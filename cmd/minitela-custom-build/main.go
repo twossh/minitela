@@ -23,16 +23,6 @@ func main() {
 		)
 	}
 
-	defaultTemplate := filepath.Join(
-		home,
-		".local",
-		"share",
-		"minitela",
-		"vendor",
-		"textures",
-		"Texture1.acf",
-	)
-
 	defaultOutput := filepath.Join(
 		home,
 		".local",
@@ -50,8 +40,8 @@ func main() {
 
 	template := flag.String(
 		"template",
-		defaultTemplate,
-		"Texture1.acf usado como template",
+		os.Getenv("MINITELA_TEMPLATE"),
+		"template ACF compatível (uso de desenvolvimento)",
 	)
 
 	output := flag.String(

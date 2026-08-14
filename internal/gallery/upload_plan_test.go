@@ -13,7 +13,7 @@ func TestBuildUploadPlan(t *testing.T) {
 	texture :=
 		filepath.Join(
 			root,
-			"Texture1.acf",
+			"Texture-test.acf",
 		)
 
 	data := make(

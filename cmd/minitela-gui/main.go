@@ -596,20 +596,10 @@ func buildGallery(
 ) fyne.CanvasObject {
 	items, err := gallery.Load()
 
-	if err != nil {
-		return container.NewVBox(
-			widget.NewLabel(
-				"Galeria original não encontrada.",
-			),
-			widget.NewLabel(
-				err.Error(),
-			),
-		)
-	}
-
-	if len(items) == 0 {
-		return widget.NewLabel(
-			"Nenhuma imagem disponível.",
+	if err != nil || len(items) == 0 {
+		return buildCustomOnlyGallery(
+			w,
+			runBackground,
 		)
 	}
 
@@ -1225,6 +1215,437 @@ func buildGallery(
 		nil,
 		nil,
 		split,
+	)
+}
+
+func buildCustomOnlyGallery(
+	w fyne.Window,
+	runBackground func(
+		string,
+		string,
+		func() error,
+	),
+) fyne.CanvasObject {
+	var customInfo *customimage.Info
+
+	preview :=
+		canvas.NewImageFromFile("")
+	preview.FillMode =
+		canvas.ImageFillContain
+	preview.CornerRadius = 12
+	preview.SetMinSize(
+		fyne.NewSize(
+			280,
+			280,
+		),
+	)
+
+	selectedTitle :=
+		widget.NewLabelWithStyle(
+			"Nenhuma imagem selecionada",
+			fyne.TextAlignCenter,
+			fyne.TextStyle{
+				Bold: true,
+			},
+		)
+
+	selectedInfo :=
+		widget.NewLabel(
+			"Selecione uma imagem PNG, JPG ou GIF.",
+		)
+	selectedInfo.Alignment =
+		fyne.TextAlignCenter
+	selectedInfo.Wrapping =
+		fyne.TextWrapWord
+
+	progressLabel :=
+		widget.NewLabel("")
+	progressLabel.Alignment =
+		fyne.TextAlignCenter
+	progressLabel.Hide()
+
+	progressBar :=
+		widget.NewProgressBar()
+	progressBar.Min = 0
+	progressBar.Max = 1
+	progressBar.SetValue(0)
+	progressBar.Hide()
+
+	showProgress := func(text string) {
+		progressLabel.SetText(text)
+		progressLabel.Show()
+		progressBar.Show()
+	}
+
+	updateBuildStage := func(
+		stage customimage.BuildStage,
+	) {
+		fyne.Do(
+			func() {
+				switch stage {
+				case customimage.BuildStageImage:
+					showProgress(
+						"Gerando imagem...",
+					)
+
+				case customimage.BuildStageSTCRGBA:
+					showProgress(
+						"Convertendo STCRGBA...",
+					)
+
+				case customimage.BuildStageACF:
+					showProgress(
+						"Preparando ACF...",
+					)
+				}
+			},
+		)
+	}
+
+	updateUploadStage := func(
+		stage textureupload.Stage,
+	) {
+		fyne.Do(
+			func() {
+				switch stage {
+				case textureupload.StagePreparing:
+					showProgress(
+						"Preparando upload...",
+					)
+
+				case textureupload.StageConnecting:
+					showProgress(
+						"Conectando à MiniTela...",
+					)
+
+				case textureupload.StageUploading:
+					progressBar.SetValue(0)
+					showProgress(
+						"Enviando 0%",
+					)
+
+				case textureupload.StageReconnecting:
+					progressBar.SetValue(1)
+					showProgress(
+						"Reconectando MiniTela...",
+					)
+
+				case textureupload.StageSelectingScreen:
+					progressBar.SetValue(1)
+					showProgress(
+						"Ativando imagem na MiniTela...",
+					)
+
+				case textureupload.StageDone:
+					progressBar.SetValue(1)
+					showProgress(
+						"Imagem enviada ✓",
+					)
+				}
+			},
+		)
+	}
+
+	updateUploadProgress := func(
+		progress r15m.UploadProgress,
+	) {
+		fyne.Do(
+			func() {
+				value :=
+					float64(
+						progress.Percent,
+					) / 100.0
+
+				if value < 0 {
+					value = 0
+				}
+
+				if value > 1 {
+					value = 1
+				}
+
+				progressBar.SetValue(value)
+				progressLabel.SetText(
+					fmt.Sprintf(
+						"Enviando %d%%  (%s / %s)",
+						progress.Percent,
+						formatSize(
+							progress.BytesSent,
+						),
+						formatSize(
+							progress.TotalBytes,
+						),
+					),
+				)
+				progressLabel.Show()
+				progressBar.Show()
+			},
+		)
+	}
+
+	sendButton :=
+		widget.NewButton(
+			"Gerar e enviar para MiniTela",
+			nil,
+		)
+	sendButton.Importance =
+		widget.HighImportance
+	sendButton.Disable()
+
+	var imageButton *widget.Button
+
+	setBusy := func(value bool) {
+		if value {
+			sendButton.Disable()
+
+			if imageButton != nil {
+				imageButton.Disable()
+			}
+
+			return
+		}
+
+		if customInfo != nil {
+			sendButton.Enable()
+		}
+
+		if imageButton != nil {
+			imageButton.Enable()
+		}
+
+	}
+
+	sendButton.OnTapped = func() {
+		info := customInfo
+
+		if info == nil {
+			dialog.ShowInformation(
+				"Minha imagem",
+				"Selecione uma imagem antes de enviar.",
+				w,
+			)
+			return
+		}
+
+		if _, err :=
+			customimage.ResolveTemplatePath(); err != nil {
+			dialog.ShowError(
+				fmt.Errorf(
+					"componente interno de imagem indisponível: %w",
+					err,
+				),
+				w,
+			)
+			return
+		}
+
+		progressBar.SetValue(0)
+		showProgress(
+			"Gerando imagem...",
+		)
+
+		runBackground(
+			"Gerando e enviando imagem própria...",
+			"Imagem própria enviada.",
+			func() error {
+				fyne.Do(
+					func() {
+						setBusy(true)
+					},
+				)
+
+				defer fyne.Do(
+					func() {
+						setBusy(false)
+					},
+				)
+
+				templatePath,
+					outputPath,
+					err :=
+					customimage.
+						DefaultBuildPaths()
+
+				if err != nil {
+					return err
+				}
+
+				_, err =
+					customimage.
+						BuildStaticTextureFileWithProgress(
+							info.Path,
+							templatePath,
+							outputPath,
+							updateBuildStage,
+						)
+
+				if err != nil {
+					return fmt.Errorf(
+						"gerar ACF: %w",
+						err,
+					)
+				}
+
+				_, err =
+					textureupload.
+						SendFileWithStage(
+							outputPath,
+							updateUploadProgress,
+							updateUploadStage,
+						)
+
+				if err != nil {
+					fyne.Do(
+						func() {
+							progressLabel.SetText(
+								"Falha no envio.",
+							)
+						},
+					)
+				}
+
+				return err
+			},
+		)
+	}
+
+	imageButton =
+		widget.NewButton(
+			"+ Selecionar imagem",
+			func() {
+				fileDialog :=
+					dialog.NewFileOpen(
+						func(
+							reader fyne.URIReadCloser,
+							err error,
+						) {
+							if err != nil {
+								dialog.ShowError(
+									err,
+									w,
+								)
+								return
+							}
+
+							if reader == nil {
+								return
+							}
+
+							defer reader.Close()
+
+							info, err :=
+								customimage.Import(
+									reader,
+									reader.URI().Name(),
+								)
+
+							if err != nil {
+								dialog.ShowError(
+									err,
+									w,
+								)
+								return
+							}
+
+							customInfo = info
+
+							preview.File =
+								info.Path
+							preview.Resource = nil
+							preview.Image = nil
+							preview.Refresh()
+
+							selectedTitle.SetText(
+								"Imagem própria",
+							)
+
+							details :=
+								fmt.Sprintf(
+									"%s • %dx%d • %s",
+									info.Format,
+									info.Width,
+									info.Height,
+									formatSize(
+										info.Size,
+									),
+								)
+
+							if info.Frames > 1 {
+								details +=
+									fmt.Sprintf(
+										" • %d frames",
+										info.Frames,
+									)
+							}
+
+							selectedInfo.SetText(
+								details,
+							)
+							progressBar.SetValue(0)
+							progressLabel.Hide()
+							progressBar.Hide()
+							sendButton.Enable()
+						},
+						w,
+					)
+
+				fileDialog.SetFilter(
+					storage.NewExtensionFileFilter(
+						[]string{
+							".png",
+							".jpg",
+							".jpeg",
+							".gif",
+						},
+					),
+				)
+
+				fileDialog.Resize(
+					fyne.NewSize(
+						760,
+						520,
+					),
+				)
+
+				fileDialog.Show()
+			},
+		)
+
+	customCard :=
+		widget.NewCard(
+			"Minha imagem",
+			"PNG, JPG e GIF animado",
+			container.NewVBox(
+				preview,
+				selectedTitle,
+				selectedInfo,
+				progressLabel,
+				progressBar,
+				widget.NewSeparator(),
+				imageButton,
+				sendButton,
+			),
+		)
+
+	originalInfo :=
+		widget.NewLabel(
+			"A galeria original é opcional e não está instalada neste computador. " +
+				"Você pode usar normalmente suas próprias imagens.",
+		)
+	originalInfo.Wrapping =
+		fyne.TextWrapWord
+
+	originalCard :=
+		widget.NewCard(
+			"Galeria original",
+			"Recursos opcionais",
+			originalInfo,
+		)
+
+	return container.NewGridWithColumns(
+		2,
+		customCard,
+		originalCard,
 	)
 }
 

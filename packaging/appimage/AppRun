@@ -3,16 +3,12 @@ set -e
 
 APPDIR="${APPDIR:-$(cd -- "$(dirname -- "$0")" && pwd)}"
 
-# O código atual procura os assets oficiais em
-# ~/.local/share/minitela/vendor. Quando o AppImage local contém esses
-# dados, copiamos apenas arquivos ausentes, sem sobrescrever dados já
-# existentes do usuário.
-VENDOR_SRC="${APPDIR}/usr/share/minitela/vendor"
-VENDOR_DST="${HOME}/.local/share/minitela/vendor"
+# Template neutro usado internamente pela geração de PNG/JPG/GIF.
+# O usuário final não precisa conhecer nem configurar arquivos ACF.
+INTERNAL_TEMPLATE="${APPDIR}/usr/share/minitela/template/Texture-template.acf"
 
-if [[ -d "${VENDOR_SRC}" ]]; then
-    mkdir -p "${VENDOR_DST}"
-    cp -an "${VENDOR_SRC}/." "${VENDOR_DST}/" 2>/dev/null || true
+if [[ -f "${INTERNAL_TEMPLATE}" ]]; then
+    export MINITELA_TEMPLATE="${INTERNAL_TEMPLATE}"
 fi
 
 # A regra udev precisa de privilégio administrativo porque é uma

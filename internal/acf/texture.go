@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	// TextureTemplateSize é o tamanho validado do
-	// Texture1.acf usado como template da galeria.
+	// TextureTemplateSize é o tamanho do template ACF
+	// de 30 frames validado fisicamente no R15M.
 	TextureTemplateSize = 0x1C0008
 
 	// TextureFrameCount corresponde à animação/template

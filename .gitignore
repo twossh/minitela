@@ -26,5 +26,8 @@
 # Não publicar sem verificar direitos de redistribuição.
 /assets/vendor/
 
+# Arquivos ACF locais/gerados
+*.acf
+
 # Artefatos gerados
 /dist/

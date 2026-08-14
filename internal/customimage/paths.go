@@ -8,10 +8,11 @@ import (
 
 // DefaultBuildPaths retorna:
 //
-//   - o Texture1.acf oficial usado apenas como template;
+//   - o template ACF compatível disponibilizado pelo MiniTela;
 //   - o Texture-custom.acf gerado pelo MiniTela.
 //
-// O arquivo oficial nunca é alterado.
+// No AppImage, o template é interno e invisível ao usuário.
+// O template nunca é alterado.
 func DefaultBuildPaths() (
 	templatePath string,
 	outputPath string,
@@ -25,16 +26,11 @@ func DefaultBuildPaths() (
 		)
 	}
 
-	templatePath =
-		filepath.Join(
-			home,
-			".local",
-			"share",
-			"minitela",
-			"vendor",
-			"textures",
-			"Texture1.acf",
-		)
+	templatePath, err =
+		ResolveTemplatePath()
+	if err != nil {
+		return "", "", err
+	}
 
 	outputPath =
 		filepath.Join(

@@ -27,6 +27,10 @@ BUILD_GUI="${WORK_DIR}/minitela-gui"
 BUILD_BACKEND="${WORK_DIR}/minitela"
 BUILD_CTL="${WORK_DIR}/MiniTelaCtl"
 
+# Template neutro validado fisicamente. Ele é incorporado ao AppImage,
+# ficando invisível ao usuário final.
+TEMPLATE_SOURCE="${MINITELA_TEMPLATE_FILE:-}"
+
 cleanup() {
     rm -rf -- "${WORK_DIR}"
 }
@@ -78,6 +82,14 @@ command -v file >/dev/null 2>&1 || die "file não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.svg" ]] || die "minitela.svg não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.service" ]] || die "minitela.service não encontrado"
 [[ -f "${ROOT_DIR}/packaging/udev/99-minitela.rules" ]] || die "regra udev não encontrada"
+[[ -n "${TEMPLATE_SOURCE}" ]] || \
+    die "defina MINITELA_TEMPLATE_FILE com o template neutro validado"
+[[ -f "${TEMPLATE_SOURCE}" ]] || \
+    die "template neutro não encontrado: ${TEMPLATE_SOURCE}"
+
+template_size="$(wc -c < "${TEMPLATE_SOURCE}")"
+[[ "${template_size}" == "1835016" ]] || \
+    die "template neutro possui ${template_size} bytes; esperado 1835016"
 
 download_tool "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}"
 download_tool "${APPIMAGETOOL_URL}" "${APPIMAGETOOL}"
@@ -119,7 +131,8 @@ rm -rf -- "${APPDIR}"
 mkdir -p \
     "${APPDIR}/usr/bin" \
     "${APPDIR}/usr/share/minitela/systemd" \
-    "${APPDIR}/usr/share/minitela/udev"
+    "${APPDIR}/usr/share/minitela/udev" \
+    "${APPDIR}/usr/share/minitela/template"
 
 install -m 0755 "${BUILD_GUI}" "${APPDIR}/usr/bin/minitela-gui"
 install -m 0644 \
@@ -128,23 +141,9 @@ install -m 0644 \
 install -m 0644 \
     "${ROOT_DIR}/packaging/udev/99-minitela.rules" \
     "${APPDIR}/usr/share/minitela/udev/99-minitela.rules"
-
-# Build local: inclui os assets vendor se existirem.
-# Eles estão ignorados pelo Git e NÃO devem ser publicados sem uma
-# verificação específica dos direitos de redistribuição.
-if [[ "${MINITELA_INCLUDE_VENDOR:-1}" == "1" ]]; then
-    if [[ -d "${ROOT_DIR}/assets/vendor" ]]; then
-        log "Incluindo assets/vendor no AppImage local"
-        mkdir -p "${APPDIR}/usr/share/minitela/vendor"
-        cp -a \
-            "${ROOT_DIR}/assets/vendor/." \
-            "${APPDIR}/usr/share/minitela/vendor/"
-    else
-        echo "AVISO: assets/vendor não encontrado; AppImage será criado sem galeria/template ACF." >&2
-    fi
-else
-    log "Build sem assets vendor (MINITELA_INCLUDE_VENDOR=0)"
-fi
+install -m 0644 \
+    "${TEMPLATE_SOURCE}" \
+    "${APPDIR}/usr/share/minitela/template/Texture-template.acf"
 
 mkdir -p "${DIST_DIR}"
 find "${DIST_DIR}" -maxdepth 1 -type f -name '*.AppImage' -delete
