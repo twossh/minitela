@@ -12,18 +12,20 @@ ARCH="$(uname -m)"
 }
 
 LINUXDEPLOY_VERSION="1-alpha-20251107-1"
-APPIMAGE_PLUGIN_VERSION="1-alpha-20250213-1"
+APPIMAGETOOL_VERSION="1.9.1"
 
 TOOLS_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/minitela/appimage-tools"
 LINUXDEPLOY="${TOOLS_DIR}/linuxdeploy-x86_64.AppImage"
-APPIMAGE_PLUGIN="${TOOLS_DIR}/linuxdeploy-plugin-appimage-x86_64.AppImage"
+APPIMAGETOOL="${TOOLS_DIR}/appimagetool-x86_64.AppImage"
 
 LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage"
-APPIMAGE_PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/${APPIMAGE_PLUGIN_VERSION}/linuxdeploy-plugin-appimage-x86_64.AppImage"
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/minitela-appimage.XXXXXX")"
 APPDIR="${WORK_DIR}/MiniTela.AppDir"
-BUILD_BIN="${WORK_DIR}/minitela-gui"
+BUILD_GUI="${WORK_DIR}/minitela-gui"
+BUILD_BACKEND="${WORK_DIR}/minitela"
+BUILD_CTL="${WORK_DIR}/MiniTelaCtl"
 
 cleanup() {
     rm -rf -- "${WORK_DIR}"
@@ -74,9 +76,12 @@ command -v file >/dev/null 2>&1 || die "file não encontrado"
 [[ -x "${APPIMAGE_DIR}/AppRun" ]] || die "AppRun ausente ou sem permissão de execução"
 [[ -f "${APPIMAGE_DIR}/minitela.desktop" ]] || die "minitela.desktop não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.svg" ]] || die "minitela.svg não encontrado"
+[[ -f "${APPIMAGE_DIR}/minitela.service" ]] || die "minitela.service não encontrado"
+[[ -x "${APPIMAGE_DIR}/install-udev-rule" ]] || die "install-udev-rule ausente ou sem permissão de execução"
+[[ -f "${ROOT_DIR}/packaging/udev/99-minitela.rules" ]] || die "regra udev não encontrada"
 
 download_tool "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}"
-download_tool "${APPIMAGE_PLUGIN_URL}" "${APPIMAGE_PLUGIN}"
+download_tool "${APPIMAGETOOL_URL}" "${APPIMAGETOOL}"
 
 log "Executando testes"
 (
@@ -84,24 +89,50 @@ log "Executando testes"
     go test ./...
 )
 
-log "Compilando MiniTela GUI em modo release"
+log "Compilando MiniTela GUI, backend e controle em modo release"
 (
     cd "${ROOT_DIR}"
+
     go build \
         -trimpath \
         -ldflags="-s -w" \
-        -o "${BUILD_BIN}" \
+        -o "${BUILD_GUI}" \
         ./cmd/minitela-gui
+
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -o "${BUILD_BACKEND}" \
+        ./cmd/minitela
+
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -o "${BUILD_CTL}" \
+        ./cmd/minitela-ctl
 )
 
-file "${BUILD_BIN}"
+file "${BUILD_GUI}"
+file "${BUILD_BACKEND}"
+file "${BUILD_CTL}"
 
 rm -rf -- "${APPDIR}"
 mkdir -p \
     "${APPDIR}/usr/bin" \
-    "${APPDIR}/usr/share/minitela"
+    "${APPDIR}/usr/libexec" \
+    "${APPDIR}/usr/share/minitela/systemd" \
+    "${APPDIR}/usr/share/minitela/udev"
 
-install -m 0755 "${BUILD_BIN}" "${APPDIR}/usr/bin/minitela-gui"
+install -m 0755 "${BUILD_GUI}" "${APPDIR}/usr/bin/minitela-gui"
+install -m 0755 \
+    "${APPIMAGE_DIR}/install-udev-rule" \
+    "${APPDIR}/usr/libexec/minitela-install-udev"
+install -m 0644 \
+    "${APPIMAGE_DIR}/minitela.service" \
+    "${APPDIR}/usr/share/minitela/systemd/minitela.service"
+install -m 0644 \
+    "${ROOT_DIR}/packaging/udev/99-minitela.rules" \
+    "${APPDIR}/usr/share/minitela/udev/99-minitela.rules"
 
 # Build local: inclui os assets vendor se existirem.
 # Eles estão ignorados pelo Git e NÃO devem ser publicados sem uma
@@ -130,6 +161,12 @@ log "Montando AppDir e dependências com linuxdeploy"
 export APPIMAGE_EXTRACT_AND_RUN=1
 export ARCH="x86_64"
 
+# O strip embutido no linuxdeploy pode ser mais antigo que o binutils
+# da distribuição usada para o build. Fedora moderno usa seções ELF
+# como .relr.dyn, que versões antigas de strip não reconhecem.
+# O binário Go já foi compilado com -ldflags="-s -w".
+export NO_STRIP=1
+
 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
     --executable "${APPDIR}/usr/bin/minitela-gui" \
@@ -137,36 +174,45 @@ export ARCH="x86_64"
     --icon-file "${APPIMAGE_DIR}/minitela.svg" \
     --custom-apprun "${APPIMAGE_DIR}/AppRun"
 
-log "Gerando AppImage"
+# O teste físico no Fedora 44 demonstrou que misturar as bibliotecas
+# X11 copiadas pelo linuxdeploy com libX11/libxcb/libGL do sistema
+# causa SIGSEGV ainda no carregador dinâmico (_dl_init).
+#
+# Mantemos o RPATH preparado pelo linuxdeploy, mas removemos a família
+# libX do AppDir. Sem uma cópia local, o loader usa as bibliotecas X11
+# da própria distribuição.
+log "Removendo bibliotecas X11 do AppDir"
 
-(
-    cd "${DIST_DIR}"
+find "${APPDIR}/usr/lib" \
+    -maxdepth 1 \
+    -type f \
+    -name 'libX*.so*' \
+    -print \
+    -delete
 
-    "${LINUXDEPLOY}" \
-        --appdir "${APPDIR}" \
-        --output appimage
-)
+# Backend e utilitário de controle são instalados somente DEPOIS do
+# linuxdeploy. Assim eles não recebem RPATH/patchelf destinado ao AppDir.
+# Além disso são compilados com CGO desabilitado para não depender do
+# carregador dinâmico/libc da distribuição quando forem copiados para
+# ~/.local/share/minitela/bin.
+log "Instalando backend e MiniTelaCtl sem alterações do linuxdeploy"
 
-mapfile -t generated < <(
-    find "${DIST_DIR}" \
-        -maxdepth 1 \
-        -type f \
-        -name '*.AppImage' \
-        -print
-)
+install -m 0755 "${BUILD_BACKEND}" "${APPDIR}/usr/bin/minitela"
+install -m 0755 "${BUILD_CTL}" "${APPDIR}/usr/bin/MiniTelaCtl"
 
-[[ "${#generated[@]}" -eq 1 ]] || {
-    printf 'ERRO: esperado 1 AppImage em %s, encontrados %d\n' \
-        "${DIST_DIR}" "${#generated[@]}" >&2
-    printf '%s\n' "${generated[@]:-}"
-    exit 1
-}
+file "${APPDIR}/usr/bin/minitela"
+file "${APPDIR}/usr/bin/MiniTelaCtl"
 
 FINAL="${DIST_DIR}/MiniTela-x86_64.AppImage"
+rm -f -- "${FINAL}"
 
-if [[ "${generated[0]}" != "${FINAL}" ]]; then
-    mv -f -- "${generated[0]}" "${FINAL}"
-fi
+log "Gerando AppImage com appimagetool"
+
+ARCH="x86_64" \
+APPIMAGE_EXTRACT_AND_RUN=1 \
+"${APPIMAGETOOL}" \
+    "${APPDIR}" \
+    "${FINAL}"
 
 chmod +x "${FINAL}"
 

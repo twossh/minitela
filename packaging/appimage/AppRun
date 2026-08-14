@@ -15,6 +15,77 @@ if [[ -d "${VENDOR_SRC}" ]]; then
     cp -an "${VENDOR_SRC}/." "${VENDOR_DST}/" 2>/dev/null || true
 fi
 
+# A regra udev precisa de privilégio administrativo porque é uma
+# configuração do sistema. Ela só é solicitada quando estiver ausente
+# ou diferente da versão embutida no AppImage.
+UDEV_RULE_SRC="${APPDIR}/usr/share/minitela/udev/99-minitela.rules"
+UDEV_RULE_DST="/etc/udev/rules.d/99-minitela.rules"
+SETUP_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/minitela"
+SETUP_LOG="${SETUP_STATE_DIR}/setup.log"
+
+if [[ -f "${UDEV_RULE_SRC}" ]] && {
+    [[ ! -f "${UDEV_RULE_DST}" ]] ||
+    ! cmp -s "${UDEV_RULE_SRC}" "${UDEV_RULE_DST}"
+}; then
+    mkdir -p "${SETUP_STATE_DIR}"
+
+    if command -v pkexec >/dev/null 2>&1 &&
+       command -v sha256sum >/dev/null 2>&1; then
+        # O root não lê diretamente do mount FUSE do AppImage e também
+        # não depende de stdin. Criamos uma cópia temporária 0600 fora
+        # do AppImage e fixamos seu SHA256 antes da autenticação.
+        setup_base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+        setup_tmp="$(mktemp -d "${setup_base}/minitela-udev.XXXXXX")"
+        chmod 0700 "${setup_tmp}"
+        setup_rule="${setup_tmp}/99-minitela.rules"
+
+        install -m 0600 "${UDEV_RULE_SRC}" "${setup_rule}"
+        expected_sha="$(sha256sum "${setup_rule}" | awk '{print $1}')"
+
+        if pkexec /bin/sh -c '
+            set -eu
+
+            src="$1"
+            expected="$2"
+            rule_dir="/etc/udev/rules.d"
+            rule_dst="${rule_dir}/99-minitela.rules"
+
+            mkdir -p "${rule_dir}"
+
+            tmp="$(mktemp "${rule_dir}/.99-minitela.rules.XXXXXX")"
+            trap '\''rm -f "${tmp}"'\'' EXIT HUP INT TERM
+
+            install -m 0600 "${src}" "${tmp}"
+
+            actual="$(sha256sum "${tmp}" | awk '\''{print $1}'\'')"
+            if [ "${actual}" != "${expected}" ]; then
+                echo "ERRO: SHA256 da regra udev não confere." >&2
+                exit 10
+            fi
+
+            chmod 0644 "${tmp}"
+            mv -f "${tmp}" "${rule_dst}"
+            trap - EXIT HUP INT TERM
+
+            udevadm control --reload-rules
+            udevadm trigger --action=add --subsystem-match=tty
+            udevadm settle
+        ' sh "${setup_rule}" "${expected_sha}" >>"${SETUP_LOG}" 2>&1; then
+            printf '%s udev: regra instalada/atualizada\n' \
+                "$(date -Is)" >>"${SETUP_LOG}"
+        else
+            status=$?
+            printf '%s udev: instalação não concluída (status=%d)\n' \
+                "$(date -Is)" "${status}" >>"${SETUP_LOG}"
+        fi
+
+        rm -rf -- "${setup_tmp}"
+    else
+        printf '%s udev: pkexec ou sha256sum não encontrado\n' \
+            "$(date -Is)" >>"${SETUP_LOG}"
+    fi
+fi
+
 # O AppImage é autônomo: provisiona o backend e o serviço systemd do
 # usuário sem sudo. Abrir a GUI garante que o serviço esteja rodando,
 # mas NÃO altera a preferência de inicialização automática.

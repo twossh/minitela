@@ -6,6 +6,7 @@
 # Backups e arquivos temporários
 *.pre-*
 *.bak
+*.orig
 *.v1-working
 *.tmp
 

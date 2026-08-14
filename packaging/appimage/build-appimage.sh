@@ -77,6 +77,7 @@ command -v file >/dev/null 2>&1 || die "file não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.desktop" ]] || die "minitela.desktop não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.svg" ]] || die "minitela.svg não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.service" ]] || die "minitela.service não encontrado"
+[[ -f "${ROOT_DIR}/packaging/udev/99-minitela.rules" ]] || die "regra udev não encontrada"
 
 download_tool "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}"
 download_tool "${APPIMAGETOOL_URL}" "${APPIMAGETOOL}"
@@ -117,12 +118,16 @@ file "${BUILD_CTL}"
 rm -rf -- "${APPDIR}"
 mkdir -p \
     "${APPDIR}/usr/bin" \
-    "${APPDIR}/usr/share/minitela/systemd"
+    "${APPDIR}/usr/share/minitela/systemd" \
+    "${APPDIR}/usr/share/minitela/udev"
 
 install -m 0755 "${BUILD_GUI}" "${APPDIR}/usr/bin/minitela-gui"
 install -m 0644 \
     "${APPIMAGE_DIR}/minitela.service" \
     "${APPDIR}/usr/share/minitela/systemd/minitela.service"
+install -m 0644 \
+    "${ROOT_DIR}/packaging/udev/99-minitela.rules" \
+    "${APPDIR}/usr/share/minitela/udev/99-minitela.rules"
 
 # Build local: inclui os assets vendor se existirem.
 # Eles estão ignorados pelo Git e NÃO devem ser publicados sem uma
