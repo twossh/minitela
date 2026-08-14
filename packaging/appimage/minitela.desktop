@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MiniTela
+Comment=Gerencie a tela auxiliar do Positivo Vision R15M
+Exec=minitela-gui
+Icon=minitela
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=MiniTela
+Keywords=MiniTela;R15M;Positivo;Display;

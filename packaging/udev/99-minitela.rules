@@ -1,0 +1,8 @@
+# MiniTela / Positivo Vision R15M / CherryUSB CDC ACM
+# VID:PID 0324:0324
+#
+# - mantém acesso pelo grupo dialout;
+# - concede acesso ao usuário da sessão gráfica via uaccess;
+# - impede que o ModemManager tente tratar a MiniTela como modem;
+# - cria um alias estável opcional em /dev/minitela-r15m.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0324", ATTRS{idProduct}=="0324", MODE="0660", GROUP="dialout", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", SYMLINK+="minitela-r15m"

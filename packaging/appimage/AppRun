@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -e
+
+APPDIR="${APPDIR:-$(cd -- "$(dirname -- "$0")" && pwd)}"
+
+# O código atual procura os assets oficiais em
+# ~/.local/share/minitela/vendor. Quando o AppImage local contém esses
+# dados, copiamos apenas arquivos ausentes, sem sobrescrever dados já
+# existentes do usuário.
+VENDOR_SRC="${APPDIR}/usr/share/minitela/vendor"
+VENDOR_DST="${HOME}/.local/share/minitela/vendor"
+
+if [[ -d "${VENDOR_SRC}" ]]; then
+    mkdir -p "${VENDOR_DST}"
+    cp -an "${VENDOR_SRC}/." "${VENDOR_DST}/" 2>/dev/null || true
+fi
+
+export PATH="${APPDIR}/usr/bin:${PATH}"
+exec "${APPDIR}/usr/bin/minitela-gui" "$@"

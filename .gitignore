@@ -19,3 +19,11 @@
 # Sistema/editor
 .DS_Store
 *~
+
+# Vendor data local
+# Arquivos originais do R15M usados para testes e empacotamento local.
+# Não publicar sem verificar direitos de redistribuição.
+/assets/vendor/
+
+# Artefatos gerados
+/dist/

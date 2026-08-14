@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+APPIMAGE_DIR="${ROOT_DIR}/packaging/appimage"
+DIST_DIR="${ROOT_DIR}/dist"
+
+ARCH="$(uname -m)"
+[[ "${ARCH}" == "x86_64" ]] || {
+    echo "ERRO: este build v1 suporta apenas x86_64 (detectado: ${ARCH})." >&2
+    exit 1
+}
+
+LINUXDEPLOY_VERSION="1-alpha-20251107-1"
+APPIMAGE_PLUGIN_VERSION="1-alpha-20250213-1"
+
+TOOLS_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/minitela/appimage-tools"
+LINUXDEPLOY="${TOOLS_DIR}/linuxdeploy-x86_64.AppImage"
+APPIMAGE_PLUGIN="${TOOLS_DIR}/linuxdeploy-plugin-appimage-x86_64.AppImage"
+
+LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage"
+APPIMAGE_PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/${APPIMAGE_PLUGIN_VERSION}/linuxdeploy-plugin-appimage-x86_64.AppImage"
+
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/minitela-appimage.XXXXXX")"
+APPDIR="${WORK_DIR}/MiniTela.AppDir"
+BUILD_BIN="${WORK_DIR}/minitela-gui"
+
+cleanup() {
+    rm -rf -- "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+log() {
+    printf '\n==> %s\n' "$*"
+}
+
+die() {
+    printf '\nERRO: %s\n' "$*" >&2
+    exit 1
+}
+
+download_tool() {
+    local url="$1"
+    local output="$2"
+
+    if [[ -x "${output}" ]]; then
+        return
+    fi
+
+    mkdir -p "$(dirname -- "${output}")"
+
+    log "Baixando $(basename -- "${output}")"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "${output}" \
+            "${url}"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "${output}" "${url}"
+    else
+        die "curl ou wget é necessário para baixar as ferramentas AppImage"
+    fi
+
+    chmod +x "${output}"
+}
+
+command -v go >/dev/null 2>&1 || die "Go não encontrado"
+command -v file >/dev/null 2>&1 || die "file não encontrado"
+
+[[ -f "${ROOT_DIR}/go.mod" ]] || die "go.mod não encontrado"
+[[ -x "${APPIMAGE_DIR}/AppRun" ]] || die "AppRun ausente ou sem permissão de execução"
+[[ -f "${APPIMAGE_DIR}/minitela.desktop" ]] || die "minitela.desktop não encontrado"
+[[ -f "${APPIMAGE_DIR}/minitela.svg" ]] || die "minitela.svg não encontrado"
+
+download_tool "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}"
+download_tool "${APPIMAGE_PLUGIN_URL}" "${APPIMAGE_PLUGIN}"
+
+log "Executando testes"
+(
+    cd "${ROOT_DIR}"
+    go test ./...
+)
+
+log "Compilando MiniTela GUI em modo release"
+(
+    cd "${ROOT_DIR}"
+    go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -o "${BUILD_BIN}" \
+        ./cmd/minitela-gui
+)
+
+file "${BUILD_BIN}"
+
+rm -rf -- "${APPDIR}"
+mkdir -p \
+    "${APPDIR}/usr/bin" \
+    "${APPDIR}/usr/share/minitela"
+
+install -m 0755 "${BUILD_BIN}" "${APPDIR}/usr/bin/minitela-gui"
+
+# Build local: inclui os assets vendor se existirem.
+# Eles estão ignorados pelo Git e NÃO devem ser publicados sem uma
+# verificação específica dos direitos de redistribuição.
+if [[ "${MINITELA_INCLUDE_VENDOR:-1}" == "1" ]]; then
+    if [[ -d "${ROOT_DIR}/assets/vendor" ]]; then
+        log "Incluindo assets/vendor no AppImage local"
+        mkdir -p "${APPDIR}/usr/share/minitela/vendor"
+        cp -a \
+            "${ROOT_DIR}/assets/vendor/." \
+            "${APPDIR}/usr/share/minitela/vendor/"
+    else
+        echo "AVISO: assets/vendor não encontrado; AppImage será criado sem galeria/template ACF." >&2
+    fi
+else
+    log "Build sem assets vendor (MINITELA_INCLUDE_VENDOR=0)"
+fi
+
+mkdir -p "${DIST_DIR}"
+find "${DIST_DIR}" -maxdepth 1 -type f -name '*.AppImage' -delete
+
+log "Montando AppDir e dependências com linuxdeploy"
+
+# Permite executar as próprias ferramentas AppImage mesmo em ambientes
+# onde FUSE não esteja disponível.
+export APPIMAGE_EXTRACT_AND_RUN=1
+export ARCH="x86_64"
+
+"${LINUXDEPLOY}" \
+    --appdir "${APPDIR}" \
+    --executable "${APPDIR}/usr/bin/minitela-gui" \
+    --desktop-file "${APPIMAGE_DIR}/minitela.desktop" \
+    --icon-file "${APPIMAGE_DIR}/minitela.svg" \
+    --custom-apprun "${APPIMAGE_DIR}/AppRun"
+
+log "Gerando AppImage"
+
+(
+    cd "${DIST_DIR}"
+
+    "${LINUXDEPLOY}" \
+        --appdir "${APPDIR}" \
+        --output appimage
+)
+
+mapfile -t generated < <(
+    find "${DIST_DIR}" \
+        -maxdepth 1 \
+        -type f \
+        -name '*.AppImage' \
+        -print
+)
+
+[[ "${#generated[@]}" -eq 1 ]] || {
+    printf 'ERRO: esperado 1 AppImage em %s, encontrados %d\n' \
+        "${DIST_DIR}" "${#generated[@]}" >&2
+    printf '%s\n' "${generated[@]:-}"
+    exit 1
+}
+
+FINAL="${DIST_DIR}/MiniTela-x86_64.AppImage"
+
+if [[ "${generated[0]}" != "${FINAL}" ]]; then
+    mv -f -- "${generated[0]}" "${FINAL}"
+fi
+
+chmod +x "${FINAL}"
+
+log "AppImage criado com sucesso"
+ls -lh "${FINAL}"
+
+echo
+echo "SHA256:"
+sha256sum "${FINAL}"
+
+echo
+echo "Teste:"
+echo "  ${FINAL}"
