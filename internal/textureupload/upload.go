@@ -21,6 +21,27 @@ const (
 	controllerRestartDelay = 4 * time.Second
 )
 
+// Stage identifica as etapas observáveis do fluxo de upload.
+type Stage string
+
+const (
+	StagePreparing       Stage = "preparing"
+	StageConnecting      Stage = "connecting"
+	StageUploading       Stage = "uploading"
+	StageReconnecting    Stage = "reconnecting"
+	StageSelectingScreen Stage = "selecting-screen"
+	StageDone            Stage = "done"
+)
+
+func reportStage(
+	fn func(Stage),
+	stage Stage,
+) {
+	if fn != nil {
+		fn(stage)
+	}
+}
+
 // SendFile envia um ACF válido para o R15M.
 //
 // A função:
@@ -39,6 +60,28 @@ func SendFile(
 	result *r15m.UploadResult,
 	err error,
 ) {
+	return SendFileWithStage(
+		path,
+		onProgress,
+		nil,
+	)
+}
+
+// SendFileWithStage preserva o comportamento de SendFile e
+// também reporta as transições de etapa para a interface.
+func SendFileWithStage(
+	path string,
+	onProgress func(r15m.UploadProgress),
+	onStage func(Stage),
+) (
+	result *r15m.UploadResult,
+	err error,
+) {
+	reportStage(
+		onStage,
+		StagePreparing,
+	)
+
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf(
 			"arquivo ACF não informado",
@@ -100,6 +143,11 @@ func SendFile(
 		}()
 	}
 
+	reportStage(
+		onStage,
+		StageConnecting,
+	)
+
 	conn, err := r15m.Connect()
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -116,6 +164,11 @@ func SendFile(
 
 	defer cancel()
 
+	reportStage(
+		onStage,
+		StageUploading,
+	)
+
 	result, err =
 		conn.UploadTexture(
 			ctx,
@@ -131,6 +184,11 @@ func SendFile(
 			err,
 		)
 	}
+
+	reportStage(
+		onStage,
+		StageReconnecting,
+	)
 
 	// O DownloadComplete normalmente provoca reboot/
 	// reenumeração do controlador USB.
@@ -149,6 +207,11 @@ func SendFile(
 			err,
 		)
 	}
+
+	reportStage(
+		onStage,
+		StageSelectingScreen,
+	)
 
 	if err :=
 		pageConn.SetScreen(
@@ -172,6 +235,11 @@ func SendFile(
 			err,
 		)
 	}
+
+	reportStage(
+		onStage,
+		StageDone,
+	)
 
 	return result, nil
 }

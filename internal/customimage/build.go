@@ -3,9 +3,10 @@ package customimage
 import (
 	"fmt"
 	"image"
-	_ "image/gif"
+	"image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -24,22 +25,62 @@ type BuildStats struct {
 	STC          stc.ImageStats
 }
 
+// BuildStage identifica a etapa atual da geração da textura.
+type BuildStage string
+
+const (
+	BuildStageImage   BuildStage = "image"
+	BuildStageSTCRGBA BuildStage = "stcrgba"
+	BuildStageACF     BuildStage = "acf"
+	BuildStageDone    BuildStage = "done"
+)
+
+func reportBuildStage(
+	fn func(BuildStage),
+	stage BuildStage,
+) {
+	if fn != nil {
+		fn(stage)
+	}
+}
+
 // BuildStaticTextureFile converte uma imagem comum em
-// um ACF estático compatível com a página de imagem do R15M.
+// um ACF compatível com a página de imagem do R15M.
 //
 // Formatos registrados:
 //   - PNG
 //   - JPEG
-//   - GIF
+//   - GIF animado
 //
-// Para GIF, esta versão estática utiliza o primeiro frame.
-// O suporte animado será implementado separadamente.
+// PNG/JPEG continuam gerando uma textura estática. GIFs são
+// compostos e distribuídos pelos 30 frames físicos do ACF.
 func BuildStaticTextureFile(
 	inputPath string,
 	templatePath string,
 	outputPath string,
 ) (BuildStats, error) {
+	return BuildStaticTextureFileWithProgress(
+		inputPath,
+		templatePath,
+		outputPath,
+		nil,
+	)
+}
+
+// BuildStaticTextureFileWithProgress mantém o mesmo pipeline de
+// geração e reporta transições de etapa para a interface.
+func BuildStaticTextureFileWithProgress(
+	inputPath string,
+	templatePath string,
+	outputPath string,
+	onStage func(BuildStage),
+) (BuildStats, error) {
 	var stats BuildStats
+
+	reportBuildStage(
+		onStage,
+		BuildStageImage,
+	)
 
 	if inputPath == "" {
 		return stats, fmt.Errorf(
@@ -93,17 +134,61 @@ func BuildStaticTextureFile(
 		)
 	}
 
-	frame, stcStats, err :=
-		stc.EncodeImageOpaque(img)
+	reportBuildStage(
+		onStage,
+		BuildStageSTCRGBA,
+	)
 
-	if err != nil {
-		return stats, fmt.Errorf(
-			"gerar STCRGBA: %w",
-			err,
-		)
+	var (
+		staticFrame []byte
+		gifFrames   [][]byte
+	)
+
+	if format == "gif" {
+		if _, err := input.Seek(
+			0,
+			io.SeekStart,
+		); err != nil {
+			return stats, fmt.Errorf(
+				"reposicionar GIF: %w",
+				err,
+			)
+		}
+
+		animation, err := gif.DecodeAll(input)
+		if err != nil {
+			return stats, fmt.Errorf(
+				"decodificar GIF animado: %w",
+				err,
+			)
+		}
+
+		stats.SourceWidth = animation.Config.Width
+		stats.SourceHeight = animation.Config.Height
+
+		gifFrames, stats.STC, err =
+			encodeGIFTextureFrames(animation)
+		if err != nil {
+			return stats, fmt.Errorf(
+				"gerar STCRGBA do GIF: %w",
+				err,
+			)
+		}
+	} else {
+		staticFrame, stats.STC, err =
+			stc.EncodeImageOpaque(img)
+		if err != nil {
+			return stats, fmt.Errorf(
+				"gerar STCRGBA: %w",
+				err,
+			)
+		}
 	}
 
-	stats.STC = stcStats
+	reportBuildStage(
+		onStage,
+		BuildStageACF,
+	)
 
 	template, err := os.ReadFile(
 		templatePath,
@@ -125,10 +210,20 @@ func BuildStaticTextureFile(
 		)
 	}
 
-	result, err := acf.BuildStaticTexture(
-		template,
-		frame,
-	)
+	var result []byte
+
+	if format == "gif" {
+		result, err = acf.BuildTextureFrames(
+			template,
+			gifFrames,
+		)
+	} else {
+		result, err = acf.BuildStaticTexture(
+			template,
+			staticFrame,
+		)
+	}
+
 	if err != nil {
 		return stats, fmt.Errorf(
 			"montar ACF: %w",
@@ -198,6 +293,11 @@ func BuildStaticTextureFile(
 			err,
 		)
 	}
+
+	reportBuildStage(
+		onStage,
+		BuildStageDone,
+	)
 
 	return stats, nil
 }

@@ -12,6 +12,7 @@ const (
 	ScreenNotes    Screen = 2
 	ScreenMonitor  Screen = 3
 	ScreenWeather  Screen = 4
+	ScreenImage    Screen = 5
 )
 
 func (s Screen) String() string {
@@ -24,6 +25,8 @@ func (s Screen) String() string {
 		return "Monitor"
 	case ScreenWeather:
 		return "Clima"
+	case ScreenImage:
+		return "Imagem"
 	default:
 		return fmt.Sprintf("Página %d", s)
 	}
@@ -43,9 +46,12 @@ func ParseScreen(value string) (Screen, error) {
 	case "weather", "clima":
 		return ScreenWeather, nil
 
+	case "image", "imagem":
+		return ScreenImage, nil
+
 	default:
 		return 0, fmt.Errorf(
-			"tela desconhecida %q; use whatsapp, notes, monitor ou weather",
+			"tela desconhecida %q; use whatsapp, notes, monitor, weather ou image",
 			value,
 		)
 	}
@@ -55,7 +61,7 @@ func (c *Connection) SetScreen(
 	screen Screen,
 ) error {
 	if screen < ScreenWhatsApp ||
-		screen > ScreenWeather {
+		screen > ScreenImage {
 		return fmt.Errorf(
 			"tela inválida: %d",
 			screen,

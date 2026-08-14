@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/twossh/minitela/internal/config"
 	"github.com/twossh/minitela/internal/customimage"
 	"github.com/twossh/minitela/internal/gallery"
+	"github.com/twossh/minitela/internal/r15m"
 	"github.com/twossh/minitela/internal/textureupload"
 )
 
@@ -592,20 +592,16 @@ func buildGallery(
 	}
 
 	selected := items[0]
-
 	customSelected := false
-
 	var customInfo *customimage.Info
+
 	preview :=
 		canvas.NewImageFromFile(
 			selected.PreviewPath,
 		)
-
 	preview.FillMode =
 		canvas.ImageFillContain
-
 	preview.CornerRadius = 12
-
 	preview.SetMinSize(
 		fyne.NewSize(
 			220,
@@ -634,7 +630,6 @@ func buildGallery(
 				),
 			),
 		)
-
 	selectedInfo.Alignment =
 		fyne.TextAlignCenter
 
@@ -643,19 +638,182 @@ func buildGallery(
 			"Enviar para MiniTela",
 			nil,
 		)
-
 	sendButton.Importance =
 		widget.HighImportance
+
+	progressLabel :=
+		widget.NewLabel("")
+	progressLabel.Alignment =
+		fyne.TextAlignCenter
+
+	progressBar :=
+		widget.NewProgressBar()
+	progressBar.Min = 0
+	progressBar.Max = 1
+	progressBar.SetValue(0)
+	progressLabel.Hide()
+	progressBar.Hide()
+
+	var customButton *widget.Button
+	galleryButtons := make(
+		[]*widget.Button,
+		0,
+		len(items),
+	)
+
+	setGalleryBusy := func(value bool) {
+		if value {
+			sendButton.Disable()
+
+			if customButton != nil {
+				customButton.Disable()
+			}
+
+			for _, button := range galleryButtons {
+				button.Disable()
+			}
+
+			return
+		}
+
+		sendButton.Enable()
+
+		if customButton != nil {
+			customButton.Enable()
+		}
+
+		for _, button := range galleryButtons {
+			button.Enable()
+		}
+	}
+
+	resetProgress := func() {
+		progressBar.SetValue(0)
+		progressLabel.Hide()
+		progressBar.Hide()
+	}
+
+	showProgress := func(text string) {
+		progressLabel.SetText(text)
+		progressLabel.Show()
+		progressBar.Show()
+	}
+
+	updateBuildStage := func(
+		stage customimage.BuildStage,
+	) {
+		fyne.Do(
+			func() {
+				switch stage {
+				case customimage.BuildStageImage:
+					showProgress(
+						"Gerando imagem...",
+					)
+
+				case customimage.BuildStageSTCRGBA:
+					showProgress(
+						"Convertendo STCRGBA...",
+					)
+
+				case customimage.BuildStageACF:
+					showProgress(
+						"Preparando ACF...",
+					)
+				}
+			},
+		)
+	}
+
+	updateUploadStage := func(
+		stage textureupload.Stage,
+	) {
+		fyne.Do(
+			func() {
+				switch stage {
+				case textureupload.StagePreparing:
+					showProgress(
+						"Preparando upload...",
+					)
+
+				case textureupload.StageConnecting:
+					showProgress(
+						"Conectando à MiniTela...",
+					)
+
+				case textureupload.StageUploading:
+					progressBar.SetValue(0)
+					showProgress(
+						"Enviando 0%",
+					)
+
+				case textureupload.StageReconnecting:
+					progressBar.SetValue(1)
+					showProgress(
+						"Reconectando MiniTela...",
+					)
+
+				case textureupload.StageSelectingScreen:
+					progressBar.SetValue(1)
+					showProgress(
+						"Ativando imagem na MiniTela...",
+					)
+
+				case textureupload.StageDone:
+					progressBar.SetValue(1)
+					showProgress(
+						"Imagem enviada ✓",
+					)
+				}
+			},
+		)
+	}
+
+	updateUploadProgress := func(
+		progress r15m.UploadProgress,
+	) {
+		fyne.Do(
+			func() {
+				value :=
+					float64(
+						progress.Percent,
+					) / 100.0
+
+				if value < 0 {
+					value = 0
+				}
+
+				if value > 1 {
+					value = 1
+				}
+
+				progressBar.SetValue(value)
+
+				progressLabel.SetText(
+					fmt.Sprintf(
+						"Enviando %d%%  (%s / %s)",
+						progress.Percent,
+						formatSize(
+							progress.BytesSent,
+						),
+						formatSize(
+							progress.TotalBytes,
+						),
+					),
+				)
+				progressLabel.Show()
+				progressBar.Show()
+			},
+		)
+	}
 
 	selectGalleryImage :=
 		func(item gallery.Item) {
 			selected = item
 			customSelected = false
-
 			customInfo = nil
+
 			preview.File =
 				item.PreviewPath
-
 			preview.Resource = nil
 			preview.Image = nil
 			preview.Refresh()
@@ -679,208 +837,255 @@ func buildGallery(
 			sendButton.SetText(
 				"Enviar para MiniTela",
 			)
-
 			sendButton.Enable()
+			resetProgress()
 		}
 
-	sendButton.OnTapped =
-		func() {
-			if customSelected {
-				info := customInfo
+	sendButton.OnTapped = func() {
+		if customSelected {
+			info := customInfo
 
-				if info == nil {
-					dialog.ShowError(
-						fmt.Errorf(
-							"imagem própria não carregada",
-						),
-						w,
-					)
-
-					return
-				}
-
-				runBackground(
-					"Gerando e enviando imagem própria...",
-					"Imagem própria enviada.",
-					func() error {
-						templatePath,
-							outputPath,
-							err :=
-							customimage.
-								DefaultBuildPaths()
-
-						if err != nil {
-							return err
-						}
-
-						_,
-							err =
-							customimage.
-								BuildStaticTextureFile(
-									info.Path,
-									templatePath,
-									outputPath,
-								)
-
-						if err != nil {
-							return fmt.Errorf(
-								"gerar ACF: %w",
-								err,
-							)
-						}
-
-						_,
-							err =
-							textureupload.
-								SendFile(
-									outputPath,
-									nil,
-								)
-
-						if err != nil {
-							return err
-						}
-
-						return nil
-					},
+			if info == nil {
+				dialog.ShowError(
+					fmt.Errorf(
+						"imagem própria não carregada",
+					),
+					w,
 				)
-
 				return
 			}
 
-			item := selected
+			progressBar.SetValue(0)
+			showProgress(
+				"Gerando imagem...",
+			)
 
 			runBackground(
-				fmt.Sprintf(
-					"Enviando imagem %d...",
-					item.ID,
-				),
-
-				fmt.Sprintf(
-					"Imagem %d enviada.",
-					item.ID,
-				),
-
+				"Gerando e enviando imagem própria...",
+				"Imagem própria enviada.",
 				func() error {
-					return runSibling(
-						"MiniTelaImages",
-						"--send",
-						strconv.Itoa(
-							item.ID,
-						),
+					fyne.Do(
+						func() {
+							setGalleryBusy(true)
+						},
 					)
+
+					defer fyne.Do(
+						func() {
+							setGalleryBusy(false)
+						},
+					)
+
+					templatePath,
+						outputPath,
+						err :=
+						customimage.
+							DefaultBuildPaths()
+
+					if err != nil {
+						return err
+					}
+
+					_, err =
+						customimage.
+							BuildStaticTextureFileWithProgress(
+								info.Path,
+								templatePath,
+								outputPath,
+								updateBuildStage,
+							)
+
+					if err != nil {
+						return fmt.Errorf(
+							"gerar ACF: %w",
+							err,
+						)
+					}
+
+					_, err =
+						textureupload.
+							SendFileWithStage(
+								outputPath,
+								updateUploadProgress,
+								updateUploadStage,
+							)
+
+					if err != nil {
+						fyne.Do(
+							func() {
+								progressLabel.SetText(
+									"Falha no envio.",
+								)
+							},
+						)
+						return err
+					}
+
+					return nil
 				},
 			)
+
+			return
 		}
 
-	customButton :=
+		item := selected
+
+		progressBar.SetValue(0)
+		showProgress(
+			"Preparando upload...",
+		)
+
+		runBackground(
+			fmt.Sprintf(
+				"Enviando imagem %d...",
+				item.ID,
+			),
+			fmt.Sprintf(
+				"Imagem %d enviada.",
+				item.ID,
+			),
+			func() error {
+				fyne.Do(
+					func() {
+						setGalleryBusy(true)
+					},
+				)
+
+				defer fyne.Do(
+					func() {
+						setGalleryBusy(false)
+					},
+				)
+
+				_, err :=
+					textureupload.
+						SendFileWithStage(
+							item.TexturePath,
+							updateUploadProgress,
+							updateUploadStage,
+						)
+
+				if err != nil {
+					fyne.Do(
+						func() {
+							progressLabel.SetText(
+								"Falha no envio.",
+							)
+						},
+					)
+				}
+
+				return err
+			},
+		)
+	}
+
+	customButton =
 		widget.NewButton(
 			"+ Adicionar imagem própria",
 			nil,
 		)
 
-	customButton.OnTapped =
-		func() {
-			fileDialog :=
-				dialog.NewFileOpen(
-					func(
-						reader fyne.URIReadCloser,
-						err error,
-					) {
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
+	customButton.OnTapped = func() {
+		fileDialog :=
+			dialog.NewFileOpen(
+				func(
+					reader fyne.URIReadCloser,
+					err error,
+				) {
+					if err != nil {
+						dialog.ShowError(
+							err,
+							w,
+						)
+						return
+					}
 
-						if reader == nil {
-							return
-						}
+					if reader == nil {
+						return
+					}
 
-						defer reader.Close()
+					defer reader.Close()
 
-						info, err :=
-							customimage.Import(
-								reader,
-								reader.URI().Name(),
-							)
-
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
-
-						customSelected = true
-						customInfo = info
-
-						preview.File =
-							info.Path
-
-						preview.Resource = nil
-						preview.Image = nil
-						preview.Refresh()
-
-						selectedTitle.SetText(
-							"Imagem própria",
+					info, err :=
+						customimage.Import(
+							reader,
+							reader.URI().Name(),
 						)
 
-						details :=
+					if err != nil {
+						dialog.ShowError(
+							err,
+							w,
+						)
+						return
+					}
+
+					customSelected = true
+					customInfo = info
+
+					preview.File =
+						info.Path
+					preview.Resource = nil
+					preview.Image = nil
+					preview.Refresh()
+
+					selectedTitle.SetText(
+						"Imagem própria",
+					)
+
+					details :=
+						fmt.Sprintf(
+							"%s • %dx%d • %s",
+							info.Format,
+							info.Width,
+							info.Height,
+							formatSize(
+								info.Size,
+							),
+						)
+
+					if info.Frames > 1 {
+						details +=
 							fmt.Sprintf(
-								"%s • %dx%d • %s",
-								info.Format,
-								info.Width,
-								info.Height,
-								formatSize(
-									info.Size,
-								),
+								" • %d frames",
+								info.Frames,
 							)
+					}
 
-						if info.Frames > 1 {
-							details +=
-								fmt.Sprintf(
-									" • %d frames",
-									info.Frames,
-								)
-						}
+					selectedInfo.SetText(
+						details,
+					)
 
-						selectedInfo.SetText(
-							details,
-						)
-
-						sendButton.SetText(
-							"Gerar e enviar para MiniTela",
-						)
-
-						sendButton.Enable()
-					},
-					w,
-				)
-
-			fileDialog.SetFilter(
-				storage.NewExtensionFileFilter(
-					[]string{
-						".png",
-						".jpg",
-						".jpeg",
-						".gif",
-					},
-				),
+					sendButton.SetText(
+						"Gerar e enviar para MiniTela",
+					)
+					sendButton.Enable()
+					resetProgress()
+				},
+				w,
 			)
 
-			fileDialog.Resize(
-				fyne.NewSize(
-					760,
-					520,
-				),
-			)
+		fileDialog.SetFilter(
+			storage.NewExtensionFileFilter(
+				[]string{
+					".png",
+					".jpg",
+					".jpeg",
+					".gif",
+				},
+			),
+		)
 
-			fileDialog.Show()
-		}
+		fileDialog.Resize(
+			fyne.NewSize(
+				760,
+				520,
+			),
+		)
+
+		fileDialog.Show()
+	}
 
 	details :=
 		widget.NewCard(
@@ -890,9 +1095,9 @@ func buildGallery(
 				preview,
 				selectedTitle,
 				selectedInfo,
-
+				progressLabel,
+				progressBar,
 				widget.NewSeparator(),
-
 				sendButton,
 				customButton,
 			),
@@ -906,19 +1111,15 @@ func buildGallery(
 		)
 
 	for _, item := range items {
-
 		item := item
 
 		thumb :=
 			canvas.NewImageFromFile(
 				item.PreviewPath,
 			)
-
 		thumb.FillMode =
 			canvas.ImageFillContain
-
 		thumb.CornerRadius = 8
-
 		thumb.SetMinSize(
 			fyne.NewSize(
 				100,
@@ -932,16 +1133,19 @@ func buildGallery(
 					"Selecionar %02d",
 					item.ID,
 				),
-
 				func() {
 					selectGalleryImage(
 						item,
 					)
 				},
 			)
-
 		selectButton.Importance =
 			widget.LowImportance
+
+		galleryButtons = append(
+			galleryButtons,
+			selectButton,
+		)
 
 		card :=
 			widget.NewCard(
@@ -949,22 +1153,19 @@ func buildGallery(
 					"Imagem %02d",
 					item.ID,
 				),
-
 				formatSize(
 					item.TextureSize,
 				),
-
 				container.NewVBox(
 					thumb,
 					selectButton,
 				),
 			)
 
-		thumbs =
-			append(
-				thumbs,
-				card,
-			)
+		thumbs = append(
+			thumbs,
+			card,
+		)
 	}
 
 	grid :=
@@ -983,10 +1184,7 @@ func buildGallery(
 			galleryScroll,
 			details,
 		)
-
-	split.SetOffset(
-		0.68,
-	)
+	split.SetOffset(0.68)
 
 	header :=
 		container.NewVBox(
@@ -996,7 +1194,6 @@ func buildGallery(
 					len(items),
 				),
 			),
-
 			widget.NewSeparator(),
 		)
 

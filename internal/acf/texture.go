@@ -94,17 +94,49 @@ func BuildStaticTexture(
 	template []byte,
 	frame []byte,
 ) ([]byte, error) {
+	if len(frame) != TextureFrameSize {
+		return nil, fmt.Errorf(
+			"frame STCRGBA possui 0x%X bytes; esperado 0x%X",
+			len(frame),
+			TextureFrameSize,
+		)
+	}
+
+	frames := make(
+		[][]byte,
+		TextureFrameCount,
+	)
+
+	for i := range frames {
+		frames[i] = frame
+	}
+
+	return BuildTextureFrames(
+		template,
+		frames,
+	)
+}
+
+// BuildTextureFrames cria um ACF completo usando os 30 frames
+// STCRGBA fornecidos na ordem em que serão reproduzidos.
+//
+// Header e tail permanecem byte por byte iguais ao template;
+// somente payload e checksum são atualizados.
+func BuildTextureFrames(
+	template []byte,
+	frames [][]byte,
+) ([]byte, error) {
 	if err := ValidateTextureTemplate(
 		template,
 	); err != nil {
 		return nil, err
 	}
 
-	if len(frame) != TextureFrameSize {
+	if len(frames) != TextureFrameCount {
 		return nil, fmt.Errorf(
-			"frame STCRGBA possui 0x%X bytes; esperado 0x%X",
-			len(frame),
-			TextureFrameSize,
+			"quantidade de frames STCRGBA=%d; esperado=%d",
+			len(frames),
+			TextureFrameCount,
 		)
 	}
 
@@ -118,7 +150,15 @@ func BuildStaticTexture(
 		template,
 	)
 
-	for frameIndex := 0; frameIndex < TextureFrameCount; frameIndex++ {
+	for frameIndex, frame := range frames {
+		if len(frame) != TextureFrameSize {
+			return nil, fmt.Errorf(
+				"frame STCRGBA %d possui 0x%X bytes; esperado 0x%X",
+				frameIndex,
+				len(frame),
+				TextureFrameSize,
+			)
+		}
 
 		start := PayloadOffset +
 			frameIndex*TextureFrameSize

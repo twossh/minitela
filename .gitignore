@@ -1,27 +1,21 @@
-# Builds
+# Binários locais
+/MiniTelaGUI
+/MiniTelaGUI-*
 /bin/
-/dist/
-/build/
 
-# AppImage
-*.AppImage
-*.AppDir/
-
-# Logs
-*.log
-
-# Temporary
-*.tmp
+# Backups e arquivos temporários
+*.pre-*
 *.bak
+*.v1-working
+*.tmp
+
+# Patches locais
+*.patch
+
+# Pacotes/snapshots locais
+*.tar.gz
+*.zip
+
+# Sistema/editor
+.DS_Store
 *~
-
-# IDE
-.vscode/
-.idea/
-
-# Local configuration
-config.local.json
-
-# ACF/generated files
-*.acf
-acf-analysis/
