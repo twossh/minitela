@@ -176,8 +176,7 @@ func normalize(cfg *Config) {
 	case "whatsapp",
 		"notes",
 		"monitor",
-		"weather",
-		"image":
+		"weather":
 	default:
 		cfg.LastScreen = "monitor"
 	}

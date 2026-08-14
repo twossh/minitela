@@ -137,7 +137,7 @@ func main() {
 	}
 
 	screen, err :=
-		parseConfiguredScreen(
+		r15m.ParseScreen(
 			cfg.LastScreen,
 		)
 
@@ -371,16 +371,6 @@ func runWithoutRestore(
 	)
 }
 
-func parseConfiguredScreen(
-	value string,
-) (r15m.Screen, error) {
-	if value == "image" {
-		return r15m.ScreenImage, nil
-	}
-
-	return r15m.ParseScreen(value)
-}
-
 func screenConfigName(
 	screen r15m.Screen,
 ) string {
@@ -396,9 +386,6 @@ func screenConfigName(
 
 	case r15m.ScreenWeather:
 		return "weather"
-
-	case r15m.ScreenImage:
-		return "image"
 
 	default:
 		return "monitor"
