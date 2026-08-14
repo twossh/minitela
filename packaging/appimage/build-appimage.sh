@@ -23,7 +23,9 @@ APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${A
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/minitela-appimage.XXXXXX")"
 APPDIR="${WORK_DIR}/MiniTela.AppDir"
-BUILD_BIN="${WORK_DIR}/minitela-gui"
+BUILD_GUI="${WORK_DIR}/minitela-gui"
+BUILD_BACKEND="${WORK_DIR}/minitela"
+BUILD_CTL="${WORK_DIR}/MiniTelaCtl"
 
 cleanup() {
     rm -rf -- "${WORK_DIR}"
@@ -74,6 +76,7 @@ command -v file >/dev/null 2>&1 || die "file não encontrado"
 [[ -x "${APPIMAGE_DIR}/AppRun" ]] || die "AppRun ausente ou sem permissão de execução"
 [[ -f "${APPIMAGE_DIR}/minitela.desktop" ]] || die "minitela.desktop não encontrado"
 [[ -f "${APPIMAGE_DIR}/minitela.svg" ]] || die "minitela.svg não encontrado"
+[[ -f "${APPIMAGE_DIR}/minitela.service" ]] || die "minitela.service não encontrado"
 
 download_tool "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}"
 download_tool "${APPIMAGETOOL_URL}" "${APPIMAGETOOL}"
@@ -84,24 +87,42 @@ log "Executando testes"
     go test ./...
 )
 
-log "Compilando MiniTela GUI em modo release"
+log "Compilando MiniTela GUI, backend e controle em modo release"
 (
     cd "${ROOT_DIR}"
+
     go build \
         -trimpath \
         -ldflags="-s -w" \
-        -o "${BUILD_BIN}" \
+        -o "${BUILD_GUI}" \
         ./cmd/minitela-gui
+
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -o "${BUILD_BACKEND}" \
+        ./cmd/minitela
+
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -o "${BUILD_CTL}" \
+        ./cmd/minitela-ctl
 )
 
-file "${BUILD_BIN}"
+file "${BUILD_GUI}"
+file "${BUILD_BACKEND}"
+file "${BUILD_CTL}"
 
 rm -rf -- "${APPDIR}"
 mkdir -p \
     "${APPDIR}/usr/bin" \
-    "${APPDIR}/usr/share/minitela"
+    "${APPDIR}/usr/share/minitela/systemd"
 
-install -m 0755 "${BUILD_BIN}" "${APPDIR}/usr/bin/minitela-gui"
+install -m 0755 "${BUILD_GUI}" "${APPDIR}/usr/bin/minitela-gui"
+install -m 0644 \
+    "${APPIMAGE_DIR}/minitela.service" \
+    "${APPDIR}/usr/share/minitela/systemd/minitela.service"
 
 # Build local: inclui os assets vendor se existirem.
 # Eles estão ignorados pelo Git e NÃO devem ser publicados sem uma
@@ -158,6 +179,19 @@ find "${APPDIR}/usr/lib" \
     -name 'libX*.so*' \
     -print \
     -delete
+
+# Backend e utilitário de controle são instalados somente DEPOIS do
+# linuxdeploy. Assim eles não recebem RPATH/patchelf destinado ao AppDir.
+# Além disso são compilados com CGO desabilitado para não depender do
+# carregador dinâmico/libc da distribuição quando forem copiados para
+# ~/.local/share/minitela/bin.
+log "Instalando backend e MiniTelaCtl sem alterações do linuxdeploy"
+
+install -m 0755 "${BUILD_BACKEND}" "${APPDIR}/usr/bin/minitela"
+install -m 0755 "${BUILD_CTL}" "${APPDIR}/usr/bin/MiniTelaCtl"
+
+file "${APPDIR}/usr/bin/minitela"
+file "${APPDIR}/usr/bin/MiniTelaCtl"
 
 FINAL="${DIST_DIR}/MiniTela-x86_64.AppImage"
 rm -f -- "${FINAL}"

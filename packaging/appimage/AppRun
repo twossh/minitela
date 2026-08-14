@@ -15,5 +15,52 @@ if [[ -d "${VENDOR_SRC}" ]]; then
     cp -an "${VENDOR_SRC}/." "${VENDOR_DST}/" 2>/dev/null || true
 fi
 
+# O AppImage é autônomo: provisiona o backend e o serviço systemd do
+# usuário sem sudo. Abrir a GUI garante que o serviço esteja rodando,
+# mas NÃO altera a preferência de inicialização automática.
+RUNTIME_BIN_DIR="${HOME}/.local/share/minitela/bin"
+BACKEND_SRC="${APPDIR}/usr/bin/minitela"
+BACKEND_DST="${RUNTIME_BIN_DIR}/minitela"
+SERVICE_SRC="${APPDIR}/usr/share/minitela/systemd/minitela.service"
+SERVICE_DIR="${HOME}/.config/systemd/user"
+SERVICE_DST="${SERVICE_DIR}/minitela.service"
+
+backend_changed=0
+service_changed=0
+
+if [[ -x "${BACKEND_SRC}" ]]; then
+    mkdir -p "${RUNTIME_BIN_DIR}"
+
+    if [[ ! -f "${BACKEND_DST}" ]] || ! cmp -s "${BACKEND_SRC}" "${BACKEND_DST}"; then
+        install -m 0755 "${BACKEND_SRC}" "${BACKEND_DST}"
+        backend_changed=1
+    fi
+fi
+
+if [[ -f "${SERVICE_SRC}" ]]; then
+    mkdir -p "${SERVICE_DIR}"
+
+    if [[ ! -f "${SERVICE_DST}" ]] || ! cmp -s "${SERVICE_SRC}" "${SERVICE_DST}"; then
+        install -m 0644 "${SERVICE_SRC}" "${SERVICE_DST}"
+        service_changed=1
+    fi
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    if (( service_changed )); then
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+
+    if (( backend_changed || service_changed )); then
+        if systemctl --user is-active --quiet minitela.service; then
+            systemctl --user restart minitela.service >/dev/null 2>&1 || true
+        else
+            systemctl --user start minitela.service >/dev/null 2>&1 || true
+        fi
+    else
+        systemctl --user start minitela.service >/dev/null 2>&1 || true
+    fi
+fi
+
 export PATH="${APPDIR}/usr/bin:${PATH}"
 exec "${APPDIR}/usr/bin/minitela-gui" "$@"

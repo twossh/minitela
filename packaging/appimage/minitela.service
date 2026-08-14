@@ -1,0 +1,12 @@
+[Unit]
+Description=MiniTela backend para Positivo Vision R15M
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/minitela/bin/minitela
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
