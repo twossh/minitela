@@ -21,6 +21,7 @@ import (
 	"github.com/twossh/minitela/internal/config"
 	"github.com/twossh/minitela/internal/customimage"
 	"github.com/twossh/minitela/internal/gallery"
+	"github.com/twossh/minitela/internal/textureupload"
 )
 
 const serviceName = "minitela.service"
@@ -594,6 +595,7 @@ func buildGallery(
 
 	customSelected := false
 
+	var customInfo *customimage.Info
 	preview :=
 		canvas.NewImageFromFile(
 			selected.PreviewPath,
@@ -650,6 +652,7 @@ func buildGallery(
 			selected = item
 			customSelected = false
 
+			customInfo = nil
 			preview.File =
 				item.PreviewPath
 
@@ -683,10 +686,63 @@ func buildGallery(
 	sendButton.OnTapped =
 		func() {
 			if customSelected {
-				dialog.ShowInformation(
-					"Imagem própria",
-					"A imagem já foi importada e validada. O próximo passo será gerar o ACF nativamente no Linux.",
-					w,
+				info := customInfo
+
+				if info == nil {
+					dialog.ShowError(
+						fmt.Errorf(
+							"imagem própria não carregada",
+						),
+						w,
+					)
+
+					return
+				}
+
+				runBackground(
+					"Gerando e enviando imagem própria...",
+					"Imagem própria enviada.",
+					func() error {
+						templatePath,
+							outputPath,
+							err :=
+							customimage.
+								DefaultBuildPaths()
+
+						if err != nil {
+							return err
+						}
+
+						_,
+							err =
+							customimage.
+								BuildStaticTextureFile(
+									info.Path,
+									templatePath,
+									outputPath,
+								)
+
+						if err != nil {
+							return fmt.Errorf(
+								"gerar ACF: %w",
+								err,
+							)
+						}
+
+						_,
+							err =
+							textureupload.
+								SendFile(
+									outputPath,
+									nil,
+								)
+
+						if err != nil {
+							return err
+						}
+
+						return nil
+					},
 				)
 
 				return
@@ -760,6 +816,7 @@ func buildGallery(
 						}
 
 						customSelected = true
+						customInfo = info
 
 						preview.File =
 							info.Path
@@ -796,10 +853,10 @@ func buildGallery(
 						)
 
 						sendButton.SetText(
-							"Conversor ACF — próxima etapa",
+							"Gerar e enviar para MiniTela",
 						)
 
-						sendButton.Disable()
+						sendButton.Enable()
 					},
 					w,
 				)
