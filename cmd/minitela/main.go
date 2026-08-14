@@ -1,85 +1,244 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
+	"time"
 
+	"github.com/twossh/minitela/internal/app"
+	"github.com/twossh/minitela/internal/config"
 	"github.com/twossh/minitela/internal/r15m"
 )
 
 const (
-	appName    = "MiniTela"
+	appName = "MiniTela"
+
 	appVersion = "0.1.0-dev"
 )
 
 func main() {
-	setBrightness := flag.Int(
-		"set-brightness",
-		-1,
-		"define o brilho da MiniTela entre 0 e 100",
-	)
+	screenFlag :=
+		flag.String(
+			"screen",
+			"",
+			"seleciona e salva: whatsapp, notes, monitor ou weather",
+		)
 
-	screenName := flag.String(
-		"screen",
-		"",
-		"seleciona a tela: whatsapp, notes, monitor ou weather",
-	)
+	brightnessFlag :=
+		flag.Int(
+			"set-brightness",
+			-1,
+			"define e salva brilho entre 0 e 100",
+		)
 
-	setPage := flag.Int(
-		"set-page",
-		-1,
-		"define diretamente a página 1-4 (diagnóstico)",
-	)
+	noRestore :=
+		flag.Bool(
+			"no-restore",
+			false,
+			"não restaura a última tela",
+		)
+
+	once :=
+		flag.Bool(
+			"once",
+			false,
+			"sincroniza uma vez e encerra",
+		)
 
 	flag.Parse()
 
-	if *setBrightness < -1 ||
-		*setBrightness > 100 {
-		fmt.Fprintln(
-			os.Stderr,
-			"Erro: brilho deve estar entre 0 e 100.",
+	if *brightnessFlag < -1 ||
+		*brightnessFlag > 100 {
+		fail(
+			"brilho deve estar entre 0 e 100",
+			2,
 		)
-		os.Exit(2)
 	}
 
-	if *setPage != -1 &&
-		(*setPage < 1 || *setPage > 4) {
-		fmt.Fprintln(
-			os.Stderr,
-			"Erro: página deve estar entre 1 e 4.",
+	cfg, err :=
+		config.Load()
+
+	if err != nil {
+		fail(
+			fmt.Sprintf(
+				"carregar configuração: %v",
+				err,
+			),
+			1,
 		)
-		os.Exit(2)
 	}
 
-	if *screenName != "" &&
-		*setPage != -1 {
-		fmt.Fprintln(
-			os.Stderr,
-			"Erro: use --screen ou --set-page, não os dois.",
-		)
-		os.Exit(2)
-	}
+	explicitScreen := false
+	changed := false
 
-	var selectedScreen r15m.Screen
-
-	if *screenName != "" {
-		var err error
-
-		selectedScreen, err =
-			r15m.ParseScreen(*screenName)
+	if *screenFlag != "" {
+		screen, err :=
+			r15m.ParseScreen(
+				*screenFlag,
+			)
 
 		if err != nil {
-			fmt.Fprintf(
-				os.Stderr,
-				"Erro: %v\n",
-				err,
+			fail(
+				err.Error(),
+				2,
 			)
-			os.Exit(2)
+		}
+
+		cfg.LastScreen =
+			screenConfigName(
+				screen,
+			)
+
+		explicitScreen = true
+		changed = true
+	}
+
+	if *brightnessFlag >= 0 {
+		value :=
+			*brightnessFlag
+
+		cfg.Brightness =
+			&value
+
+		changed = true
+	}
+
+	if changed {
+		if err := config.Save(
+			cfg,
+		); err != nil {
+			fail(
+				fmt.Sprintf(
+					"salvar configuração: %v",
+					err,
+				),
+				1,
+			)
 		}
 	}
 
+	printHeader(cfg)
+
+	if *noRestore &&
+		!explicitScreen {
+		runWithoutRestore(cfg)
+		return
+	}
+
+	if !cfg.RestoreLastScreen &&
+		!explicitScreen {
+		runWithoutRestore(cfg)
+		return
+	}
+
+	screen, err :=
+		r15m.ParseScreen(
+			cfg.LastScreen,
+		)
+
+	if err != nil {
+		fail(
+			fmt.Sprintf(
+				"interpretar última tela: %v",
+				err,
+			),
+			1,
+		)
+	}
+
+	ctx, stop :=
+		signal.NotifyContext(
+			context.Background(),
+			os.Interrupt,
+			syscall.SIGTERM,
+		)
+
+	defer stop()
+
+	interval :=
+		time.Duration(
+			cfg.MonitorIntervalSeconds,
+		) * time.Second
+
+	fmt.Printf(
+		"Tela desejada : %s (%d)\n",
+		screen.String(),
+		screen,
+	)
+
+	fmt.Printf(
+		"Atualização   : %s\n",
+		interval,
+	)
+
+	fmt.Println(
+		"Reconexão     : automática",
+	)
+
+	if !*once {
+		fmt.Println(
+			"Ctrl+C        : encerrar",
+		)
+	}
+
+	fmt.Println()
+
+	err =
+		app.Run(
+			ctx,
+			app.Options{
+				Screen: screen,
+
+				Brightness: cfg.Brightness,
+
+				City: cfg.City,
+
+				WeatherAPIKey: cfg.WeatherAPIKey,
+
+				MonitorInterval: interval,
+
+				ReconnectDelay: app.DefaultReconnectDelay,
+
+				Once: *once,
+
+				Logf: func(
+					format string,
+					args ...any,
+				) {
+					fmt.Printf(
+						format+"\n",
+						args...,
+					)
+				},
+			},
+		)
+
+	if err != nil {
+		fail(
+			fmt.Sprintf(
+				"MiniTela: %v",
+				err,
+			),
+			1,
+		)
+	}
+
+	if !*once {
+		fmt.Println()
+		fmt.Println(
+			"MiniTela encerrada.",
+		)
+	}
+}
+
+func printHeader(
+	cfg config.Config,
+) {
 	fmt.Printf(
 		"%s %s\n",
 		appName,
@@ -91,173 +250,157 @@ func main() {
 	)
 
 	fmt.Printf(
-		"Sistema: %s/%s\n",
+		"Sistema       : %s/%s\n",
 		runtime.GOOS,
 		runtime.GOARCH,
 	)
 
 	fmt.Println()
-	fmt.Println("Procurando MiniTela...")
 
-	conn, err := r15m.Connect()
-	if err != nil {
-		fmt.Println()
-		fmt.Println("Status: não conectada")
-		fmt.Printf("Erro: %v\n", err)
-		os.Exit(1)
+	path, _ :=
+		config.Path()
+
+	fmt.Printf(
+		"Configuração  : %s\n",
+		path,
+	)
+
+	fmt.Printf(
+		"Última tela   : %s\n",
+		cfg.LastScreen,
+	)
+
+	fmt.Printf(
+		"Cidade        : %s\n",
+		cfg.City,
+	)
+
+	if cfg.Brightness == nil {
+		fmt.Println(
+			"Brilho        : manter atual",
+		)
+	} else {
+		fmt.Printf(
+			"Brilho        : %d%%\n",
+			*cfg.Brightness,
+		)
 	}
-	defer conn.Close()
+
+	if cfg.WeatherAPIKey == "" {
+		fmt.Println(
+			"WeatherAPI    : não configurada",
+		)
+	} else {
+		fmt.Println(
+			"WeatherAPI    : configurada",
+		)
+	}
+
+	fmt.Printf(
+		"Restaurar     : %t\n",
+		cfg.RestoreLastScreen,
+	)
 
 	fmt.Println()
-	fmt.Println("Positivo R15M detectado")
+}
 
-	fmt.Printf(
-		"Dispositivo : %s\n",
-		conn.Device.Path,
+func runWithoutRestore(
+	cfg config.Config,
+) {
+	fmt.Println(
+		"Modo          : sem restauração",
 	)
 
-	fmt.Printf(
-		"USB         : %s:%s\n",
-		conn.Device.VendorID,
-		conn.Device.ProductID,
+	fmt.Println(
+		"Conectando somente para diagnóstico...",
 	)
 
-	if conn.Device.Product != "" {
-		fmt.Printf(
-			"Produto     : %s\n",
-			conn.Device.Product,
-		)
-	}
-
-	if conn.Device.Serial != "" {
-		fmt.Printf(
-			"Serial      : %s\n",
-			conn.Device.Serial,
-		)
-	}
-
-	fmt.Printf(
-		"Handshake   : % X\n",
-		conn.HandshakeResponse,
-	)
-
-	page, err := conn.ReadRegister(
-		r15m.RegisterCurrentPage,
-	)
+	conn, err :=
+		r15m.Connect()
 
 	if err != nil {
-		fmt.Printf(
-			"Página      : erro: %v\n",
-			err,
-		)
-	} else {
-		screen := r15m.Screen(page)
-
-		fmt.Printf(
-			"Página      : %d (%s)\n",
-			page,
-			screen.String(),
+		fail(
+			err.Error(),
+			1,
 		)
 	}
 
-	brightness, err := conn.ReadRegister(
-		r15m.RegisterBrightness,
-	)
+	defer conn.Close()
 
-	if err != nil {
-		fmt.Printf(
-			"Brilho      : erro: %v\n",
-			err,
-		)
-	} else {
-		fmt.Printf(
-			"Brilho      : %d%%\n",
-			brightness,
-		)
-	}
-
-	if *setBrightness >= 0 {
-		fmt.Println()
-
-		fmt.Printf(
-			"Definindo brilho para %d%%...\n",
-			*setBrightness,
-		)
-
-		actual, err :=
+	if cfg.Brightness != nil {
+		if _, err :=
 			conn.WriteRegisterVerified(
 				r15m.RegisterBrightness,
-				uint32(*setBrightness),
-			)
-
-		if err != nil {
-			fmt.Printf(
-				"Erro ao definir brilho: %v\n",
-				err,
-			)
-			os.Exit(1)
-		}
-
-		fmt.Printf(
-			"Brilho confirmado: %d%%\n",
-			actual,
-		)
-	}
-
-	if *screenName != "" {
-		fmt.Println()
-
-		fmt.Printf(
-			"Selecionando tela %s...\n",
-			selectedScreen.String(),
-		)
-
-		if err :=
-			conn.SetScreen(
-				selectedScreen,
+				uint32(
+					*cfg.Brightness,
+				),
 			); err != nil {
-			fmt.Printf(
-				"Erro ao selecionar tela: %v\n",
-				err,
+			fail(
+				fmt.Sprintf(
+					"aplicar brilho: %v",
+					err,
+				),
+				1,
 			)
-			os.Exit(1)
 		}
+	}
 
-		fmt.Printf(
-			"Tela confirmada: %s (%d)\n",
-			selectedScreen.String(),
-			selectedScreen,
+	page, err :=
+		conn.ReadRegister(
+			r15m.RegisterCurrentPage,
+		)
+
+	if err != nil {
+		fail(
+			fmt.Sprintf(
+				"ler página: %v",
+				err,
+			),
+			1,
 		)
 	}
 
-	if *setPage >= 0 {
-		fmt.Println()
+	fmt.Printf(
+		"Tela atual    : %s (%d)\n",
+		r15m.Screen(page).String(),
+		page,
+	)
 
-		fmt.Printf(
-			"Definindo página %d...\n",
-			*setPage,
-		)
+	fmt.Println(
+		"Status        : pronta",
+	)
+}
 
-		actual, err :=
-			conn.WriteRegisterVerified(
-				r15m.RegisterCurrentPage,
-				uint32(*setPage),
-			)
+func screenConfigName(
+	screen r15m.Screen,
+) string {
+	switch screen {
+	case r15m.ScreenWhatsApp:
+		return "whatsapp"
 
-		if err != nil {
-			fmt.Printf(
-				"Erro ao definir página: %v\n",
-				err,
-			)
-			os.Exit(1)
-		}
+	case r15m.ScreenNotes:
+		return "notes"
 
-		fmt.Printf(
-			"Página confirmada: %d (%s)\n",
-			actual,
-			r15m.Screen(actual).String(),
-		)
+	case r15m.ScreenMonitor:
+		return "monitor"
+
+	case r15m.ScreenWeather:
+		return "weather"
+
+	default:
+		return "monitor"
 	}
+}
 
-	fmt.Println("Status      : conectada")
+func fail(
+	message string,
+	code int,
+) {
+	fmt.Fprintf(
+		os.Stderr,
+		"Erro: %s\n",
+		message,
+	)
+
+	os.Exit(code)
 }

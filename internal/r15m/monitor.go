@@ -54,8 +54,6 @@ func (c *Connection) SyncBattery() (
 		)
 	}
 
-	// Register 1150 is a display-state register.
-	// A valid ACK is sufficient.
 	if err := c.WriteRegister(
 		RegisterBatteryLevel,
 		level,
@@ -119,18 +117,16 @@ func (c *Connection) SyncBluetooth() (
 	*BluetoothSyncResult,
 	error,
 ) {
-	bluetooth, err := metrics.ReadBluetooth()
+	bt, err := metrics.ReadBluetooth()
 	if err != nil {
 		return nil, err
 	}
 
-	// A single space reliably clears the text field on
-	// the R15M when no Bluetooth device is connected.
 	displayName := " "
 
-	if bluetooth.Connected {
+	if bt.Connected {
 		displayName = DisplayText(
-			bluetooth.Name,
+			bt.Name,
 		)
 	}
 
@@ -145,9 +141,9 @@ func (c *Connection) SyncBluetooth() (
 	}
 
 	return &BluetoothSyncResult{
-		Connected: bluetooth.Connected,
-		Address:   bluetooth.Address,
-		Name:      bluetooth.Name,
+		Connected: bt.Connected,
+		Address:   bt.Address,
+		Name:      bt.Name,
 		Display:   displayName,
 	}, nil
 }

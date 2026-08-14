@@ -4,43 +4,68 @@ package metrics
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Bluetooth struct {
+	Connected bool
 	Address   string
 	Name      string
-	Connected bool
 }
 
-// ReadBluetooth returns the first Bluetooth device currently
-// connected through BlueZ.
-//
-// No connected device is not considered an error.
 func ReadBluetooth() (*Bluetooth, error) {
-	output, err := exec.Command(
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		ctx,
 		"bluetoothctl",
 		"devices",
 		"Connected",
-	).Output()
+	)
+
+	output, err := cmd.Output()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf(
+			"timeout consultando Bluetooth",
+		)
+	}
 
 	if err != nil {
-		return nil, fmt.Errorf(
-			"consultar dispositivos Bluetooth: %w",
-			err,
-		)
+		// Para o Monitor, Bluetooth desligado ou sem
+		// controlador não deve derrubar toda a aplicação.
+		return &Bluetooth{
+			Connected: false,
+		}, nil
 	}
 
 	return parseBluetoothDevices(
 		string(output),
-	)
+	), nil
 }
 
+// parseBluetoothDevices interprets the output of:
+//
+//	bluetoothctl devices Connected
+//
+// Expected format:
+//
+//	Device D2:78:C4:27:37:A8 Pebble M350s
+//
+// If multiple devices are connected, the first one is used by
+// the current R15M Monitor layout because it has only one field
+// available for a Bluetooth device name.
 func parseBluetoothDevices(
 	output string,
-) (*Bluetooth, error) {
+) *Bluetooth {
 	scanner := bufio.NewScanner(
 		strings.NewReader(output),
 	)
@@ -50,7 +75,10 @@ func parseBluetoothDevices(
 			scanner.Text(),
 		)
 
-		if line == "" {
+		if !strings.HasPrefix(
+			line,
+			"Device ",
+		) {
 			continue
 		}
 
@@ -60,21 +88,16 @@ func parseBluetoothDevices(
 			continue
 		}
 
-		if !strings.EqualFold(
-			fields[0],
-			"Device",
-		) {
-			continue
-		}
-
 		address := fields[1]
 
 		name := ""
 
-		if len(fields) > 2 {
-			name = strings.Join(
-				fields[2:],
-				" ",
+		if len(fields) >= 3 {
+			name = strings.TrimSpace(
+				strings.Join(
+					fields[2:],
+					" ",
+				),
 			)
 		}
 
@@ -83,20 +106,13 @@ func parseBluetoothDevices(
 		}
 
 		return &Bluetooth{
+			Connected: true,
 			Address:   address,
 			Name:      name,
-			Connected: true,
-		}, nil
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf(
-			"ler saída do bluetoothctl: %w",
-			err,
-		)
+		}
 	}
 
 	return &Bluetooth{
 		Connected: false,
-	}, nil
+	}
 }

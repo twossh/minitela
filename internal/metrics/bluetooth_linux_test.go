@@ -4,23 +4,24 @@ package metrics
 
 import "testing"
 
-func TestParseBluetoothDevice(t *testing.T) {
-	input :=
-		"Device AA:BB:CC:DD:EE:FF Pebble M350s\n"
+func TestParseBluetoothDevicesConnected(t *testing.T) {
+	input := `
+Device D2:78:C4:27:37:A8 Pebble M350s
+`
 
-	got, err := parseBluetoothDevices(input)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := parseBluetoothDevices(input)
 
 	if !got.Connected {
-		t.Fatal("dispositivo deveria estar conectado")
+		t.Fatal(
+			"Bluetooth deveria estar conectado",
+		)
 	}
 
-	if got.Address != "AA:BB:CC:DD:EE:FF" {
+	if got.Address != "D2:78:C4:27:37:A8" {
 		t.Fatalf(
-			"Address=%q",
+			"Address=%q esperado=%q",
 			got.Address,
+			"D2:78:C4:27:37:A8",
 		)
 	}
 
@@ -33,15 +34,70 @@ func TestParseBluetoothDevice(t *testing.T) {
 	}
 }
 
-func TestParseBluetoothNoDevice(t *testing.T) {
-	got, err := parseBluetoothDevices("")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestParseBluetoothDevicesDisconnected(t *testing.T) {
+	got := parseBluetoothDevices("")
 
 	if got.Connected {
 		t.Fatal(
-			"não deveria existir dispositivo conectado",
+			"Bluetooth deveria estar desconectado",
+		)
+	}
+
+	if got.Name != "" {
+		t.Fatalf(
+			"Name=%q esperado vazio",
+			got.Name,
+		)
+	}
+
+	if got.Address != "" {
+		t.Fatalf(
+			"Address=%q esperado vazio",
+			got.Address,
+		)
+	}
+}
+
+func TestParseBluetoothDevicesMultiple(t *testing.T) {
+	input := `
+Device D2:78:C4:27:37:A8 Pebble M350s
+Device AA:BB:CC:DD:EE:FF Outro Dispositivo
+`
+
+	got := parseBluetoothDevices(input)
+
+	if !got.Connected {
+		t.Fatal(
+			"Bluetooth deveria estar conectado",
+		)
+	}
+
+	if got.Name != "Pebble M350s" {
+		t.Fatalf(
+			"primeiro dispositivo=%q esperado=%q",
+			got.Name,
+			"Pebble M350s",
+		)
+	}
+}
+
+func TestParseBluetoothDeviceWithoutName(t *testing.T) {
+	input := `
+Device AA:BB:CC:DD:EE:FF
+`
+
+	got := parseBluetoothDevices(input)
+
+	if !got.Connected {
+		t.Fatal(
+			"Bluetooth deveria estar conectado",
+		)
+	}
+
+	if got.Name != "AA:BB:CC:DD:EE:FF" {
+		t.Fatalf(
+			"Name=%q esperado endereço",
+			got.Name,
 		)
 	}
 }

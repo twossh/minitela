@@ -79,6 +79,44 @@ func main() {
 	)
 
 	fmt.Println()
+
+	bt, err := metrics.ReadBluetooth()
+	if err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"Bluetooth Linux: %v\n",
+			err,
+		)
+		os.Exit(1)
+	}
+
+	fmt.Println("Bluetooth detectado:")
+
+	if bt.Connected {
+		fmt.Println(
+			"  Conectado   : sim",
+		)
+		fmt.Printf(
+			"  Endereço    : %s\n",
+			bt.Address,
+		)
+		fmt.Printf(
+			"  Nome        : %s\n",
+			bt.Name,
+		)
+		fmt.Printf(
+			"  Texto R15M  : %s\n",
+			r15m.DisplayText(
+				bt.Name,
+			),
+		)
+	} else {
+		fmt.Println(
+			"  Conectado   : não",
+		)
+	}
+
+	fmt.Println()
 	fmt.Println("Conectando à MiniTela...")
 
 	conn, err := r15m.Connect()
@@ -127,6 +165,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	btResult, err :=
+		conn.SyncBluetooth()
+
+	if err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"Sincronizar Bluetooth: %v\n",
+			err,
+		)
+		os.Exit(1)
+	}
+
 	fmt.Println()
 	fmt.Println("MiniTela atualizada:")
 
@@ -149,6 +199,17 @@ func main() {
 		"  Qualidade   : %d%%\n",
 		wifiResult.Quality,
 	)
+
+	if btResult.Connected {
+		fmt.Printf(
+			"  Bluetooth   : %s\n",
+			btResult.Display,
+		)
+	} else {
+		fmt.Println(
+			"  Bluetooth   : desconectado",
+		)
+	}
 
 	fmt.Println()
 	fmt.Println("OK")
