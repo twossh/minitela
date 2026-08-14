@@ -15,11 +15,9 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/twossh/minitela/internal/config"
-	"github.com/twossh/minitela/internal/customimage"
 	"github.com/twossh/minitela/internal/gallery"
 )
 
@@ -592,7 +590,9 @@ func buildGallery(
 
 	selected := items[0]
 
-	customSelected := false
+	//
+	// PREVIEW DA IMAGEM SELECIONADA
+	//
 
 	preview :=
 		canvas.NewImageFromFile(
@@ -645,16 +645,16 @@ func buildGallery(
 	sendButton.Importance =
 		widget.HighImportance
 
-	selectGalleryImage :=
+	selectImage :=
 		func(item gallery.Item) {
 			selected = item
-			customSelected = false
 
 			preview.File =
 				item.PreviewPath
 
 			preview.Resource = nil
 			preview.Image = nil
+
 			preview.Refresh()
 
 			selectedTitle.SetText(
@@ -672,26 +672,10 @@ func buildGallery(
 					),
 				),
 			)
-
-			sendButton.SetText(
-				"Enviar para MiniTela",
-			)
-
-			sendButton.Enable()
 		}
 
 	sendButton.OnTapped =
 		func() {
-			if customSelected {
-				dialog.ShowInformation(
-					"Imagem própria",
-					"A imagem já foi importada e validada. O próximo passo será gerar o ACF nativamente no Linux.",
-					w,
-				)
-
-				return
-			}
-
 			item := selected
 
 			runBackground(
@@ -720,110 +704,14 @@ func buildGallery(
 	customButton :=
 		widget.NewButton(
 			"+ Adicionar imagem própria",
-			nil,
-		)
-
-	customButton.OnTapped =
-		func() {
-			fileDialog :=
-				dialog.NewFileOpen(
-					func(
-						reader fyne.URIReadCloser,
-						err error,
-					) {
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
-
-						if reader == nil {
-							return
-						}
-
-						defer reader.Close()
-
-						info, err :=
-							customimage.Import(
-								reader,
-								reader.URI().Name(),
-							)
-
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
-
-						customSelected = true
-
-						preview.File =
-							info.Path
-
-						preview.Resource = nil
-						preview.Image = nil
-						preview.Refresh()
-
-						selectedTitle.SetText(
-							"Imagem própria",
-						)
-
-						details :=
-							fmt.Sprintf(
-								"%s • %dx%d • %s",
-								info.Format,
-								info.Width,
-								info.Height,
-								formatSize(
-									info.Size,
-								),
-							)
-
-						if info.Frames > 1 {
-							details +=
-								fmt.Sprintf(
-									" • %d frames",
-									info.Frames,
-								)
-						}
-
-						selectedInfo.SetText(
-							details,
-						)
-
-						sendButton.SetText(
-							"Conversor ACF — próxima etapa",
-						)
-
-						sendButton.Disable()
-					},
+			func() {
+				dialog.ShowInformation(
+					"Imagem própria",
+					"PNG, JPG e GIF serão adicionados na próxima etapa.",
 					w,
 				)
-
-			fileDialog.SetFilter(
-				storage.NewExtensionFileFilter(
-					[]string{
-						".png",
-						".jpg",
-						".jpeg",
-						".gif",
-					},
-				),
-			)
-
-			fileDialog.Resize(
-				fyne.NewSize(
-					760,
-					520,
-				),
-			)
-
-			fileDialog.Show()
-		}
+			},
+		)
 
 	details :=
 		widget.NewCard(
@@ -840,6 +728,10 @@ func buildGallery(
 				customButton,
 			),
 		)
+
+	//
+	// MINIATURAS
+	//
 
 	thumbs :=
 		make(
@@ -877,7 +769,7 @@ func buildGallery(
 				),
 
 				func() {
-					selectGalleryImage(
+					selectImage(
 						item,
 					)
 				},
@@ -921,6 +813,10 @@ func buildGallery(
 			grid,
 		)
 
+	//
+	// GALERIA + PREVIEW
+	//
+
 	split :=
 		container.NewHSplit(
 			galleryScroll,
@@ -933,6 +829,14 @@ func buildGallery(
 
 	header :=
 		container.NewVBox(
+			widget.NewLabelWithStyle(
+				"Galeria",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+
 			widget.NewLabel(
 				fmt.Sprintf(
 					"%d animações disponíveis",

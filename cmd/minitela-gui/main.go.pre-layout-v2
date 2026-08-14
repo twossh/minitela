@@ -15,11 +15,10 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/twossh/minitela/internal/config"
-	"github.com/twossh/minitela/internal/customimage"
 	"github.com/twossh/minitela/internal/gallery"
 )
 
@@ -36,8 +35,8 @@ func main() {
 
 	w.Resize(
 		fyne.NewSize(
-			900,
-			580,
+			820,
+			620,
 		),
 	)
 
@@ -208,6 +207,33 @@ func main() {
 				)
 			},
 		)
+
+	restartServiceButton :=
+		widget.NewButton(
+			"Recarregar",
+			func() {
+				runBackground(
+					"Recarregando configurações...",
+					"Configurações aplicadas.",
+					func() error {
+						return runSibling(
+							"MiniTelaCtl",
+							"--restart",
+						)
+					},
+				)
+			},
+		)
+
+	powerButtons :=
+		container.NewGridWithColumns(
+			4,
+			onButton,
+			offButton,
+			rebootButton,
+			restartServiceButton,
+		)
+
 	//
 	// TELA
 	//
@@ -414,111 +440,74 @@ func main() {
 			"Positivo Vision R15M",
 		)
 
-	//
-	// LAYOUT DA ABA CONTROLE
-	//
-
-	controlHeader :=
+	controlContent :=
 		container.NewVBox(
 			title,
 			subtitle,
+
 			widget.NewSeparator(),
-		)
 
-	powerTop :=
-		container.NewGridWithColumns(
-			2,
-			onButton,
-			offButton,
-		)
+			serviceStatus,
+			actionStatus,
 
-	powerGrid :=
-		container.NewVBox(
-			powerTop,
-			rebootButton,
-		)
-
-	controlCard :=
-		widget.NewCard(
-			"Controle",
-			"Energia e estado da MiniTela",
-			container.NewVBox(
-				powerGrid,
-
-				widget.NewSeparator(),
-
-				serviceStatus,
-				actionStatus,
-			),
-		)
-
-	displayCard :=
-		widget.NewCard(
-			"Exibição",
-			"Tela, cidade e preferências",
-			container.NewVBox(
-				widget.NewLabelWithStyle(
-					"Tela",
-					fyne.TextAlignLeading,
-					fyne.TextStyle{
-						Bold: true,
-					},
-				),
-
-				screenSelect,
-
-				widget.NewLabelWithStyle(
-					"Cidade do clima",
-					fyne.TextAlignLeading,
-					fyne.TextStyle{
-						Bold: true,
-					},
-				),
-
-				cityEntry,
-
-				widget.NewLabelWithStyle(
-					"Brilho",
-					fyne.TextAlignLeading,
-					fyne.TextStyle{
-						Bold: true,
-					},
-				),
-
-				brightnessRow,
-
-				widget.NewSeparator(),
-
-				container.NewGridWithColumns(
-					2,
-					restoreCheck,
-					autostartCheck,
-				),
-			),
-		)
-
-	controlColumns :=
-		container.NewGridWithColumns(
-			2,
-			controlCard,
-			displayCard,
-		)
-
-	applyArea :=
-		container.NewVBox(
 			widget.NewSeparator(),
+
+			widget.NewLabelWithStyle(
+				"Controle",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+
+			powerButtons,
+
+			widget.NewSeparator(),
+
+			widget.NewLabelWithStyle(
+				"Tela",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+
+			screenSelect,
+
+			widget.NewLabelWithStyle(
+				"Cidade do clima",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+
+			cityEntry,
+
+			widget.NewLabelWithStyle(
+				"Brilho",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+
+			brightnessRow,
+
+			widget.NewSeparator(),
+
+			restoreCheck,
+			autostartCheck,
+
 			applyButton,
 		)
 
 	controlScroll :=
-		container.NewBorder(
-			controlHeader,
-			applyArea,
-			nil,
-			nil,
-			controlColumns,
+		container.NewVScroll(
+			controlContent,
 		)
 
+	//
 	// GALERIA ORIGINAL
 	//
 
@@ -571,277 +560,22 @@ func buildGallery(
 		func() error,
 	),
 ) fyne.CanvasObject {
-	items, err := gallery.Load()
+	items, err :=
+		gallery.Load()
 
 	if err != nil {
 		return container.NewVBox(
 			widget.NewLabel(
 				"Galeria original não encontrada.",
 			),
+
 			widget.NewLabel(
 				err.Error(),
 			),
 		)
 	}
 
-	if len(items) == 0 {
-		return widget.NewLabel(
-			"Nenhuma imagem disponível.",
-		)
-	}
-
-	selected := items[0]
-
-	customSelected := false
-
-	preview :=
-		canvas.NewImageFromFile(
-			selected.PreviewPath,
-		)
-
-	preview.FillMode =
-		canvas.ImageFillContain
-
-	preview.CornerRadius = 12
-
-	preview.SetMinSize(
-		fyne.NewSize(
-			220,
-			220,
-		),
-	)
-
-	selectedTitle :=
-		widget.NewLabelWithStyle(
-			fmt.Sprintf(
-				"Imagem %02d",
-				selected.ID,
-			),
-			fyne.TextAlignCenter,
-			fyne.TextStyle{
-				Bold: true,
-			},
-		)
-
-	selectedInfo :=
-		widget.NewLabel(
-			fmt.Sprintf(
-				"ACF: %s",
-				formatSize(
-					selected.TextureSize,
-				),
-			),
-		)
-
-	selectedInfo.Alignment =
-		fyne.TextAlignCenter
-
-	sendButton :=
-		widget.NewButton(
-			"Enviar para MiniTela",
-			nil,
-		)
-
-	sendButton.Importance =
-		widget.HighImportance
-
-	selectGalleryImage :=
-		func(item gallery.Item) {
-			selected = item
-			customSelected = false
-
-			preview.File =
-				item.PreviewPath
-
-			preview.Resource = nil
-			preview.Image = nil
-			preview.Refresh()
-
-			selectedTitle.SetText(
-				fmt.Sprintf(
-					"Imagem %02d",
-					item.ID,
-				),
-			)
-
-			selectedInfo.SetText(
-				fmt.Sprintf(
-					"ACF: %s",
-					formatSize(
-						item.TextureSize,
-					),
-				),
-			)
-
-			sendButton.SetText(
-				"Enviar para MiniTela",
-			)
-
-			sendButton.Enable()
-		}
-
-	sendButton.OnTapped =
-		func() {
-			if customSelected {
-				dialog.ShowInformation(
-					"Imagem própria",
-					"A imagem já foi importada e validada. O próximo passo será gerar o ACF nativamente no Linux.",
-					w,
-				)
-
-				return
-			}
-
-			item := selected
-
-			runBackground(
-				fmt.Sprintf(
-					"Enviando imagem %d...",
-					item.ID,
-				),
-
-				fmt.Sprintf(
-					"Imagem %d enviada.",
-					item.ID,
-				),
-
-				func() error {
-					return runSibling(
-						"MiniTelaImages",
-						"--send",
-						strconv.Itoa(
-							item.ID,
-						),
-					)
-				},
-			)
-		}
-
-	customButton :=
-		widget.NewButton(
-			"+ Adicionar imagem própria",
-			nil,
-		)
-
-	customButton.OnTapped =
-		func() {
-			fileDialog :=
-				dialog.NewFileOpen(
-					func(
-						reader fyne.URIReadCloser,
-						err error,
-					) {
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
-
-						if reader == nil {
-							return
-						}
-
-						defer reader.Close()
-
-						info, err :=
-							customimage.Import(
-								reader,
-								reader.URI().Name(),
-							)
-
-						if err != nil {
-							dialog.ShowError(
-								err,
-								w,
-							)
-							return
-						}
-
-						customSelected = true
-
-						preview.File =
-							info.Path
-
-						preview.Resource = nil
-						preview.Image = nil
-						preview.Refresh()
-
-						selectedTitle.SetText(
-							"Imagem própria",
-						)
-
-						details :=
-							fmt.Sprintf(
-								"%s • %dx%d • %s",
-								info.Format,
-								info.Width,
-								info.Height,
-								formatSize(
-									info.Size,
-								),
-							)
-
-						if info.Frames > 1 {
-							details +=
-								fmt.Sprintf(
-									" • %d frames",
-									info.Frames,
-								)
-						}
-
-						selectedInfo.SetText(
-							details,
-						)
-
-						sendButton.SetText(
-							"Conversor ACF — próxima etapa",
-						)
-
-						sendButton.Disable()
-					},
-					w,
-				)
-
-			fileDialog.SetFilter(
-				storage.NewExtensionFileFilter(
-					[]string{
-						".png",
-						".jpg",
-						".jpeg",
-						".gif",
-					},
-				),
-			)
-
-			fileDialog.Resize(
-				fyne.NewSize(
-					760,
-					520,
-				),
-			)
-
-			fileDialog.Show()
-		}
-
-	details :=
-		widget.NewCard(
-			"Selecionada",
-			"Prévia da imagem",
-			container.NewVBox(
-				preview,
-				selectedTitle,
-				selectedInfo,
-
-				widget.NewSeparator(),
-
-				sendButton,
-				customButton,
-			),
-		)
-
-	thumbs :=
+	objects :=
 		make(
 			[]fyne.CanvasObject,
 			0,
@@ -851,104 +585,116 @@ func buildGallery(
 	for _, item := range items {
 
 		item := item
+		id := item.ID
 
-		thumb :=
+		preview :=
 			canvas.NewImageFromFile(
 				item.PreviewPath,
 			)
 
-		thumb.FillMode =
+		preview.FillMode =
 			canvas.ImageFillContain
 
-		thumb.CornerRadius = 8
-
-		thumb.SetMinSize(
+		preview.SetMinSize(
 			fyne.NewSize(
-				100,
-				100,
+				150,
+				150,
 			),
 		)
 
-		selectButton :=
+		send :=
 			widget.NewButton(
-				fmt.Sprintf(
-					"Selecionar %02d",
-					item.ID,
-				),
-
+				"Enviar",
 				func() {
-					selectGalleryImage(
-						item,
+					runBackground(
+						fmt.Sprintf(
+							"Enviando imagem %d...",
+							id,
+						),
+
+						fmt.Sprintf(
+							"Imagem %d enviada.",
+							id,
+						),
+
+						func() error {
+							return runSibling(
+								"MiniTelaImages",
+								"--send",
+								strconv.Itoa(id),
+							)
+						},
 					)
 				},
 			)
 
-		selectButton.Importance =
-			widget.LowImportance
+		cardBody :=
+			container.NewBorder(
+				nil,
+				send,
+				nil,
+				nil,
+				preview,
+			)
 
 		card :=
 			widget.NewCard(
 				fmt.Sprintf(
 					"Imagem %02d",
-					item.ID,
+					id,
 				),
 
 				formatSize(
 					item.TextureSize,
 				),
 
-				container.NewVBox(
-					thumb,
-					selectButton,
-				),
+				cardBody,
 			)
 
-		thumbs =
+		objects =
 			append(
-				thumbs,
+				objects,
 				card,
 			)
 	}
 
 	grid :=
-		container.NewGridWithColumns(
-			4,
-			thumbs...,
-		)
-
-	galleryScroll :=
-		container.NewVScroll(
-			grid,
-		)
-
-	split :=
-		container.NewHSplit(
-			galleryScroll,
-			details,
-		)
-
-	split.SetOffset(
-		0.68,
-	)
-
-	header :=
-		container.NewVBox(
-			widget.NewLabel(
-				fmt.Sprintf(
-					"%d animações disponíveis",
-					len(items),
-				),
+		container.New(
+			layout.NewGridLayout(
+				3,
 			),
-
-			widget.NewSeparator(),
+			objects...,
 		)
 
-	return container.NewBorder(
-		header,
-		nil,
-		nil,
-		nil,
-		split,
+	return container.NewVBox(
+		widget.NewLabelWithStyle(
+			"Galeria Original",
+			fyne.TextAlignLeading,
+			fyne.TextStyle{
+				Bold: true,
+			},
+		),
+
+		widget.NewLabel(
+			"Selecione uma das 21 animações e envie para a MiniTela.",
+		),
+
+		widget.NewSeparator(),
+
+		grid,
+
+		widget.NewSeparator(),
+
+		widget.NewButton(
+			"Selecionar imagem própria — próxima etapa",
+			func() {
+				dialog.ShowInformation(
+					"Imagem própria",
+					"O suporte nativo para PNG, JPG e GIF será adicionado na próxima etapa.",
+					w,
+				)
+			},
+		),
 	)
 }
 
